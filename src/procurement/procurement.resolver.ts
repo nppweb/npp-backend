@@ -1,15 +1,23 @@
-import { Args, Int, Mutation, Query, Resolver } from "@nestjs/graphql";
+import { Args, Context, Int, Mutation, Query, Resolver } from "@nestjs/graphql";
 import {
   IngestNormalizedItemInput,
   IngestResult,
+  ProcurementFilterInput,
   ProcurementItemPage
 } from "./models";
 import { ProcurementService } from "./procurement.service";
+import { Public } from "../common/decorators/public.decorator";
+import { ProcurementItem, ProcurementSortInput } from "./models";
+import { AuthService } from "../auth/auth.service";
 
-@Resolver()
+@Resolver(() => ProcurementItem)
 export class ProcurementResolver {
-  constructor(private readonly procurementService: ProcurementService) {}
+  constructor(
+    private readonly procurementService: ProcurementService,
+    private readonly authService: AuthService
+  ) {}
 
+  @Public()
   @Query(() => String)
   health(): string {
     return "ok";
@@ -17,18 +25,27 @@ export class ProcurementResolver {
 
   @Query(() => ProcurementItemPage)
   procurementItems(
-    @Args("search", { nullable: true }) search?: string,
-    @Args("source", { nullable: true }) source?: string,
+    @Args("filter", { nullable: true, type: () => ProcurementFilterInput })
+    filter?: ProcurementFilterInput,
+    @Args("sort", { nullable: true, type: () => ProcurementSortInput })
+    sort?: ProcurementSortInput,
     @Args("limit", { type: () => Int, defaultValue: 20 }) limit?: number,
     @Args("offset", { type: () => Int, defaultValue: 0 }) offset?: number
-  ): ProcurementItemPage {
-    return this.procurementService.find(search, source, limit, offset);
+  ) {
+    return this.procurementService.find(filter, sort, limit, offset);
+  }
+
+  @Query(() => ProcurementItem, { nullable: true })
+  procurementItem(@Args("id") id: string) {
+    return this.procurementService.findById(id);
   }
 
   @Mutation(() => IngestResult)
-  ingestNormalizedItem(
-    @Args("input", { type: () => IngestNormalizedItemInput }) input: IngestNormalizedItemInput
-  ): IngestResult {
-    return this.procurementService.ingest(input);
+  async ingestNormalizedItem(
+    @Args("input", { type: () => IngestNormalizedItemInput }) input: IngestNormalizedItemInput,
+    @Context() context: { req?: { headers: Record<string, string | string[] | undefined>; ip?: string } }
+  ) {
+    this.authService.assertIngestToken(context.req);
+    return this.procurementService.ingest(input, context.req);
   }
 }
