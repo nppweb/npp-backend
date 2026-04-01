@@ -11,8 +11,8 @@ export class Report {
   @Field()
   name!: string;
 
-  @Field({ nullable: true })
-  description?: string | null;
+  @Field(() => String, { nullable: true })
+  description?: string;
 
   @Field(() => ReportStatus)
   status!: ReportStatus;

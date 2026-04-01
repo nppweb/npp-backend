@@ -1,58 +1,115 @@
 # backend-api
 
-![CI](https://img.shields.io/badge/CI-GitHub_Actions-2088FF?logo=githubactions&logoColor=white)
-![CD](https://img.shields.io/badge/CD-GitHub_Deploy-2ea44f?logo=github&logoColor=white)
-![Container](https://img.shields.io/badge/Container-GHCR-2496ED?logo=docker&logoColor=white)
+NestJS + GraphQL API для доменной модели платформы мониторинга закупок. Сервис хранит пользователей, сессии, источники, source runs, закупки, отчеты и принимает ingest от `processing-worker`.
 
-Серверный API-слой с бизнес-логикой платформы мониторинга закупок.
+## Required env vars
 
-## Что делает этот репозиторий
+- `DATABASE_URL`
+- `JWT_ACCESS_SECRET`
+- `INGEST_API_TOKEN`
 
-- поднимает GraphQL API (`/graphql`);
-- хранит и выдает список закупок (черновой in-memory слой);
-- принимает нормализованные события от `processing-worker` через mutation `ingestNormalizedItem`.
+Полный локальный пример лежит в [.env.example](/home/minkin/vkrdiff/backend-api/.env.example).
 
-## Черновая реализация
+## Local dev seed
 
-- NestJS + GraphQL (Apollo);
-- query `procurementItems`;
-- mutation `ingestNormalizedItem`;
-- endpoint здоровья `GET /api/health`;
-- Dockerfile и CI workflow.
+- admin: `admin@admin.ru`
+- password: `admin`
+- demo users: `analyst@admin.ru`, `user@admin.ru`
+- password for demo users: `admin`
 
-## Локальный запуск
+Seed идемпотентный и безопасно запускается повторно.
+
+## Local run
 
 ```bash
 cp .env.example .env
 npm install
+npm run db:setup
 npm run start:dev
 ```
 
-API по умолчанию:
+Если PostgreSQL нужен через Docker из общего infra-репозитория:
 
-- REST health: `http://localhost:3000/api/health`
+```bash
+cd ../deployment-infra
+cp .env.example .env
+docker compose up -d postgres
+cd ../backend-api
+```
+
+Endpoints по умолчанию:
+
+- health: `http://localhost:3000/api/health`
 - GraphQL: `http://localhost:3000/graphql`
 
-## Пример GraphQL запроса
+## Prisma / migrations / seed
+
+```bash
+npm run prisma:generate
+npm run prisma:migrate:deploy
+npm run prisma:db:seed
+```
+
+## Auth flow
+
+- `login` выдает `accessToken` и `refreshToken`
+- `refreshSession` ревокает старую refresh-session и выдает новую пару токенов
+- `logout` ревокает server-side `UserSession`
+- access token теперь привязан к `UserSession`, поэтому после logout текущая сессия становится невалидной по серверной логике
+
+Пример login:
 
 ```graphql
-query {
-  procurementItems(limit: 10, offset: 0) {
-    total
-    items {
-      externalId
-      source
-      title
-      customer
-      amount
-      currency
+mutation {
+  login(input: { email: "admin@admin.ru", password: "admin" }) {
+    accessToken
+    refreshToken
+    expiresInSeconds
+    user {
+      email
+      role
     }
   }
 }
 ```
 
-## Связи с другими репозиториями
+## Worker ingest
 
-- `aimsora` читает данные;
-- `processing-worker` пишет нормализованные записи;
-- контракты синхронизируются с `shared-contracts`.
+`processing-worker` вызывает GraphQL mutation `ingestNormalizedItem`.
+
+- JWT для ingest не нужен
+- mutation публичная только для обхода общего JWT guard
+- обязательная авторизация идет через заголовок `x-ingest-token`
+- значение `x-ingest-token` должно совпасть с `INGEST_API_TOKEN`
+
+Пример:
+
+```graphql
+mutation Ingest($input: IngestNormalizedItemInput!) {
+  ingestNormalizedItem(input: $input) {
+    accepted
+    idempotencyKey
+    procurementId
+  }
+}
+```
+
+## Dashboard data
+
+`dashboardSummary` отдает:
+
+- `totalProcurements`
+- `procurementsByStatus`
+- `procurementsOverTime`
+- `recentProcurements`
+- `sourcesSummary`
+- `recentSourceRuns`
+
+Для админки дополнительно есть:
+
+- `procurementItems`
+- `procurementItem`
+- `sources`
+- `sourceRuns`
+- `reports`
+- `users`

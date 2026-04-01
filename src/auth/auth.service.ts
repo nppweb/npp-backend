@@ -14,6 +14,7 @@ import { PrismaService } from "../prisma/prisma.service";
 
 type TokenPayload = {
   sub: string;
+  sid?: string;
   email: string;
   fullName: string;
   role: UserRole;
@@ -164,6 +165,21 @@ export class AuthService {
       throw new UnauthorizedException("User account is not active");
     }
 
+    if (payload.sid) {
+      const session = await this.prisma.userSession.findFirst({
+        where: {
+          id: payload.sid,
+          userId: user.id,
+          revokedAt: null,
+          expiresAt: { gt: new Date() }
+        }
+      });
+
+      if (!session) {
+        throw new UnauthorizedException("Session is invalid or expired");
+      }
+    }
+
     return {
       id: user.id,
       email: user.email,
@@ -192,18 +208,14 @@ export class AuthService {
       role: user.role
     };
 
-    const accessToken = await this.jwtService.signAsync(payload, {
-      secret: this.configService.getOrThrow<string>("JWT_ACCESS_SECRET"),
-      expiresIn: this.configService.get<string>("JWT_ACCESS_TTL") ?? "15m"
-    });
-
+    const accessTokenTtl = this.configService.get<string>("JWT_ACCESS_TTL") ?? "15m";
     const refreshToken = randomBytes(48).toString("hex");
     const refreshTokenHash = this.hashRefreshToken(refreshToken);
     const refreshTokenTtlDays =
       this.configService.get<number>("REFRESH_TOKEN_TTL_DAYS") ?? 30;
     const expiresAt = new Date(Date.now() + refreshTokenTtlDays * 24 * 60 * 60 * 1000);
 
-    await this.prisma.userSession.create({
+    const session = await this.prisma.userSession.create({
       data: {
         userId: user.id,
         refreshTokenHash,
@@ -213,15 +225,49 @@ export class AuthService {
       }
     });
 
+    const accessToken = await this.jwtService.signAsync(
+      {
+        ...payload,
+        sid: session.id
+      },
+      {
+        secret: this.configService.getOrThrow<string>("JWT_ACCESS_SECRET"),
+        expiresIn: accessTokenTtl
+      }
+    );
+
     return {
       accessToken,
       refreshToken,
-      expiresInSeconds: 15 * 60,
+      expiresInSeconds: this.parseDurationToSeconds(accessTokenTtl),
       user
     };
   }
 
   private hashRefreshToken(token: string): string {
     return createHash("sha256").update(token).digest("hex");
+  }
+
+  private parseDurationToSeconds(value: string): number {
+    const trimmed = value.trim();
+    const match = trimmed.match(/^(\d+)([smhd])?$/i);
+
+    if (!match) {
+      return 15 * 60;
+    }
+
+    const amount = Number(match[1]);
+    const unit = match[2]?.toLowerCase() ?? "s";
+
+    switch (unit) {
+      case "m":
+        return amount * 60;
+      case "h":
+        return amount * 60 * 60;
+      case "d":
+        return amount * 24 * 60 * 60;
+      default:
+        return amount;
+    }
   }
 }

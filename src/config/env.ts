@@ -1,5 +1,8 @@
 import { z } from "zod";
 
+const optionalNonEmptyString = <T extends z.ZodTypeAny>(schema: T) =>
+  z.preprocess((value) => (value === "" ? undefined : value), schema.optional());
+
 export const envSchema = z.object({
   NODE_ENV: z.enum(["development", "test", "production"]).default("development"),
   PORT: z.coerce.number().int().positive().default(3000),
@@ -9,9 +12,9 @@ export const envSchema = z.object({
   JWT_ACCESS_TTL: z.string().default("15m"),
   REFRESH_TOKEN_TTL_DAYS: z.coerce.number().int().positive().default(30),
   INGEST_API_TOKEN: z.string().min(16),
-  ADMIN_EMAIL: z.string().email().optional(),
-  ADMIN_PASSWORD: z.string().min(12).optional(),
-  ADMIN_FULL_NAME: z.string().min(3).optional(),
+  ADMIN_EMAIL: optionalNonEmptyString(z.string().email()),
+  ADMIN_PASSWORD: optionalNonEmptyString(z.string().min(5)),
+  ADMIN_FULL_NAME: optionalNonEmptyString(z.string().min(3)),
   LOG_LEVEL: z.string().default("info"),
   THROTTLE_TTL_MS: z.coerce.number().int().positive().default(60000),
   THROTTLE_LIMIT: z.coerce.number().int().positive().default(120)
@@ -20,5 +23,15 @@ export const envSchema = z.object({
 export type AppEnv = z.infer<typeof envSchema>;
 
 export function validateEnv(input: Record<string, unknown>): AppEnv {
-  return envSchema.parse(input);
+  const result = envSchema.safeParse(input);
+
+  if (result.success) {
+    return result.data;
+  }
+
+  const details = result.error.issues
+    .map((issue) => `${issue.path.join(".") || "env"}: ${issue.message}`)
+    .join("; ");
+
+  throw new Error(`Invalid environment configuration. ${details}`);
 }

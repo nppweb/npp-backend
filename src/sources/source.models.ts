@@ -15,14 +15,14 @@ export class Source {
   @Field()
   name!: string;
 
-  @Field({ nullable: true })
-  description?: string | null;
+  @Field(() => String, { nullable: true })
+  description?: string;
 
   @Field(() => SourceKind)
   kind!: SourceKind;
 
-  @Field({ nullable: true })
-  baseUrl?: string | null;
+  @Field(() => String, { nullable: true })
+  baseUrl?: string;
 
   @Field()
   isActive!: boolean;
@@ -60,8 +60,8 @@ export class SourceRun {
   @Field(() => Int)
   itemsFailed!: number;
 
-  @Field({ nullable: true })
-  errorMessage?: string | null;
+  @Field(() => String, { nullable: true })
+  errorMessage?: string;
 
   @Field()
   sourceCode!: string;

@@ -1,5 +1,6 @@
 import { Field, ID, InputType, ObjectType } from "@nestjs/graphql";
 import { UserRole } from "@prisma/client";
+import { IsEmail, IsEnum, IsString, MinLength } from "class-validator";
 import { registerEnumType } from "@nestjs/graphql";
 
 registerEnumType(UserRole, { name: "UserRole" });
@@ -34,23 +35,32 @@ export class User {
 @InputType()
 export class CreateUserInput {
   @Field()
+  @IsEmail()
   email!: string;
 
   @Field()
+  @IsString()
+  @MinLength(3)
   fullName!: string;
 
   @Field()
+  @IsString()
+  @MinLength(5)
   password!: string;
 
   @Field(() => UserRole)
+  @IsEnum(UserRole)
   role!: UserRole;
 }
 
 @InputType()
 export class UpdateUserRoleInput {
   @Field(() => ID)
+  @IsString()
+  @MinLength(1)
   userId!: string;
 
   @Field(() => UserRole)
+  @IsEnum(UserRole)
   role!: UserRole;
 }

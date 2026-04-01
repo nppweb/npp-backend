@@ -40,6 +40,7 @@ export class ProcurementResolver {
     return this.procurementService.findById(id);
   }
 
+  @Public()
   @Mutation(() => IngestResult)
   async ingestNormalizedItem(
     @Args("input", { type: () => IngestNormalizedItemInput }) input: IngestNormalizedItemInput,
