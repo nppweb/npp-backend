@@ -2,7 +2,7 @@
   "name": "backend-api",
   "version": "1.0.0",
   "private": true,
-  "description": "Production-ready NestJS GraphQL API для платформы мониторинга закупок AIMSORA.",
+  "description": "Production-ready NestJS GraphQL API для платформы мониторинга закупок NPPWEB.",
   "scripts": {
     "build": "npm run prisma:generate && tsc -p tsconfig.build.json",
     "start": "node dist/main.js",

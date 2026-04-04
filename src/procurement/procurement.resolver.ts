@@ -9,6 +9,8 @@ import { ProcurementService } from "./procurement.service";
 import { Public } from "../common/decorators/public.decorator";
 import { ProcurementItem, ProcurementSortInput } from "./models";
 import { AuthService } from "../auth/auth.service";
+import { Roles } from "../common/decorators/roles.decorator";
+import { UserRole } from "@prisma/client";
 
 @Resolver(() => ProcurementItem)
 export class ProcurementResolver {
@@ -24,6 +26,7 @@ export class ProcurementResolver {
   }
 
   @Query(() => ProcurementItemPage)
+  @Roles(UserRole.ANALYST, UserRole.ADMIN)
   procurementItems(
     @Args("filter", { nullable: true, type: () => ProcurementFilterInput })
     filter?: ProcurementFilterInput,
@@ -36,6 +39,7 @@ export class ProcurementResolver {
   }
 
   @Query(() => ProcurementItem, { nullable: true })
+  @Roles(UserRole.ANALYST, UserRole.ADMIN)
   procurementItem(@Args("id") id: string) {
     return this.procurementService.findById(id);
   }

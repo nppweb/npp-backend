@@ -35,8 +35,8 @@ describe("DashboardService", () => {
               id: "proc-1",
               externalId: "EXT-1",
               title: "Recent Procurement",
-              description: "demo",
-              customerName: "Demo Customer",
+              description: "real-source",
+              customerName: "ГУП Технопарк",
               amount: 120000,
               currency: "RUB",
               publishedAt: new Date("2026-03-30T10:15:00.000Z"),
@@ -46,7 +46,7 @@ describe("DashboardService", () => {
               createdAt: new Date("2026-03-30T10:16:00.000Z"),
               updatedAt: new Date("2026-03-30T10:17:00.000Z"),
               rawPayload: { seed: true },
-              source: { code: "find-tender" },
+              source: { code: "eis" },
               supplier: { name: "Supplier One" }
             }
           ])
@@ -55,9 +55,9 @@ describe("DashboardService", () => {
         count: vi.fn().mockResolvedValue(3),
         findMany: vi.fn().mockResolvedValue([
           {
-            code: "demo",
-            name: "Demo Source",
-            kind: "DEMO",
+            code: "easuz",
+            name: "ЕАСУЗ Московской области",
+            kind: "EASUZ",
             isActive: true,
             runs: [{ startedAt: new Date("2026-03-29T06:00:00.000Z") }],
             _count: {
@@ -70,9 +70,9 @@ describe("DashboardService", () => {
             }
           },
           {
-            code: "find-tender",
-            name: "Find a Tender",
-            kind: "FIND_TENDER",
+            code: "eis",
+            name: "ЕИС / zakupki.gov.ru",
+            kind: "EIS",
             isActive: true,
             runs: [{ startedAt: new Date("2026-03-30T09:00:00.000Z") }],
             _count: {
@@ -91,7 +91,7 @@ describe("DashboardService", () => {
         findMany: vi.fn().mockResolvedValue([
           {
             id: "run-1",
-            runKey: "find-tender:2026-03-30T09:00:00Z",
+            runKey: "eis:2026-03-30T09:00:00Z",
             status: "SUCCESS",
             startedAt: new Date("2026-03-30T09:00:00.000Z"),
             finishedAt: new Date("2026-03-30T09:05:00.000Z"),
@@ -99,13 +99,17 @@ describe("DashboardService", () => {
             itemsPublished: 8,
             itemsFailed: 2,
             errorMessage: null,
-            source: { code: "find-tender" }
+            source: { code: "eis" }
           }
         ])
       }
     };
 
-    const service = new DashboardService(prisma as never);
+    const configService = {
+      get: vi.fn().mockReturnValue([])
+    };
+
+    const service = new DashboardService(prisma as never, configService as never);
 
     const summary = await service.summary();
 
@@ -116,8 +120,8 @@ describe("DashboardService", () => {
       runsLast24h: 9,
       lastPublishedAt: new Date("2026-03-30T09:15:00.000Z"),
       bySource: [
-        { source: "find-tender", count: 28 },
-        { source: "demo", count: 4 }
+        { source: "eis", count: 28 },
+        { source: "easuz", count: 4 }
       ],
       procurementsByStatus: [
         { status: "ACTIVE", count: 11 },
@@ -126,19 +130,19 @@ describe("DashboardService", () => {
       recentProcurements: [
         expect.objectContaining({
           id: "proc-1",
-          source: "find-tender",
+          source: "eis",
           supplier: "Supplier One"
         })
       ],
       sourcesSummary: [
         expect.objectContaining({
-          source: "find-tender",
+          source: "eis",
           procurementCount: 11,
           recordCount: 28,
           runCount: 5
         }),
         expect.objectContaining({
-          source: "demo",
+          source: "easuz",
           procurementCount: 4,
           recordCount: 4,
           runCount: 2
@@ -147,7 +151,7 @@ describe("DashboardService", () => {
       recentSourceRuns: [
         expect.objectContaining({
           id: "run-1",
-          sourceCode: "find-tender",
+          sourceCode: "eis",
           itemsPublished: 8
         })
       ]

@@ -11,6 +11,8 @@ import { LoggerModule } from "nestjs-pino";
 import { randomUUID } from "node:crypto";
 import { AuctionResolver } from "./auction/auction.resolver";
 import { AuctionService } from "./auction/auction.service";
+import { AnalyticsResolver } from "./analytics/analytics.resolver";
+import { AnalyticsService } from "./analytics/analytics.service";
 import { AuthResolver } from "./auth/auth.resolver";
 import { AuthService } from "./auth/auth.service";
 import { envSchema, validateEnv } from "./config/env";
@@ -26,6 +28,9 @@ import { ProcurementResolver } from "./procurement/procurement.resolver";
 import { ProcurementService } from "./procurement/procurement.service";
 import { ReportsResolver } from "./reports/reports.resolver";
 import { ReportsService } from "./reports/reports.service";
+import { ScraperAdminController } from "./scraper-admin/scraper-admin.controller";
+import { ScraperAdminResolver } from "./scraper-admin/scraper-admin.resolver";
+import { ScraperAdminService } from "./scraper-admin/scraper-admin.service";
 import { SourcesResolver } from "./sources/sources.resolver";
 import { SourcesService } from "./sources/sources.service";
 import { AuditService } from "./audit/audit.service";
@@ -89,13 +94,15 @@ import { UsersService } from "./users/users.service";
       resolvers: { JSON: GraphQLJSON }
     })
   ],
-  controllers: [HealthController, MetricsController],
+  controllers: [HealthController, MetricsController, ScraperAdminController],
   providers: [
     { provide: APP_GUARD, useClass: GqlThrottlerGuard },
     { provide: APP_GUARD, useClass: GqlAuthGuard },
     { provide: APP_FILTER, useClass: HttpExceptionLoggingFilter },
     AuctionResolver,
     AuctionService,
+    AnalyticsResolver,
+    AnalyticsService,
     AuditService,
     AuthResolver,
     AuthService,
@@ -111,6 +118,8 @@ import { UsersService } from "./users/users.service";
     SupplierRiskService,
     ReportsResolver,
     ReportsService,
+    ScraperAdminResolver,
+    ScraperAdminService,
     SourcesResolver,
     SourcesService,
     UsersResolver,

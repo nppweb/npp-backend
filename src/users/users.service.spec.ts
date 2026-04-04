@@ -7,7 +7,7 @@ import { UsersService } from "./users.service";
 describe("UsersService", () => {
   const actor: AuthenticatedUser = {
     id: "admin-1",
-    email: "admin@aimsora.local",
+    email: "admin@nppweb.local",
     fullName: "Admin User",
     role: UserRole.ADMIN
   };
@@ -18,7 +18,7 @@ describe("UsersService", () => {
         findUnique: vi.fn().mockResolvedValue(null),
         upsert: vi.fn().mockResolvedValue({
           id: "user-1",
-          email: "new.user@aimsora.local",
+          email: "new.user@nppweb.local",
           fullName: "New User",
           role: UserRole.ANALYST
         })
@@ -35,7 +35,7 @@ describe("UsersService", () => {
 
     const result = await service.createUser(
       {
-        email: "New.User@Aimsora.Local",
+        email: "New.User@Nppweb.Local",
         fullName: "New User",
         password: "super-secret-password",
         role: UserRole.ANALYST
@@ -50,15 +50,15 @@ describe("UsersService", () => {
 
     expect(result).toMatchObject({
       id: "user-1",
-      email: "new.user@aimsora.local",
+      email: "new.user@nppweb.local",
       role: UserRole.ANALYST
     });
     expect(authService.hashPassword).toHaveBeenCalledTimes(1);
     expect(prisma.user.findUnique).toHaveBeenCalledWith({
-      where: { email: "new.user@aimsora.local" }
+      where: { email: "new.user@nppweb.local" }
     });
     expect(prisma.user.upsert).toHaveBeenCalledWith({
-      where: { email: "new.user@aimsora.local" },
+      where: { email: "new.user@nppweb.local" },
       update: {
         fullName: "New User",
         passwordHash: "hashed-password",
@@ -67,7 +67,7 @@ describe("UsersService", () => {
         deletedAt: null
       },
       create: {
-        email: "new.user@aimsora.local",
+        email: "new.user@nppweb.local",
         fullName: "New User",
         passwordHash: "hashed-password",
         role: UserRole.ANALYST
@@ -91,6 +91,9 @@ describe("UsersService", () => {
     const prisma = {
       user: {
         update: vi.fn()
+      },
+      userSession: {
+        updateMany: vi.fn()
       }
     };
     const authService = {
@@ -105,5 +108,98 @@ describe("UsersService", () => {
     await expect(service.deactivateUser(actor.id, actor)).rejects.toBeInstanceOf(ConflictException);
     expect(prisma.user.update).not.toHaveBeenCalled();
     expect(auditService.record).not.toHaveBeenCalled();
+  });
+
+  it("deactivates user without removing the account and revokes sessions", async () => {
+    const prisma = {
+      user: {
+        findUnique: vi.fn().mockResolvedValue({
+          id: "user-2",
+          email: "analyst@nppweb.local",
+          deletedAt: null,
+          isActive: true
+        }),
+        update: vi.fn().mockResolvedValue({
+          id: "user-2",
+          email: "analyst@nppweb.local",
+          isActive: false
+        })
+      },
+      userSession: {
+        updateMany: vi.fn().mockResolvedValue({ count: 2 })
+      }
+    };
+    const authService = {
+      hashPassword: vi.fn()
+    };
+    const auditService = {
+      record: vi.fn().mockResolvedValue(undefined)
+    };
+
+    const service = new UsersService(prisma as never, authService as never, auditService as never);
+
+    await expect(service.deactivateUser("user-2", actor)).resolves.toBe(true);
+    expect(prisma.user.update).toHaveBeenCalledWith({
+      where: { id: "user-2" },
+      data: {
+        isActive: false
+      }
+    });
+    expect(prisma.userSession.updateMany).toHaveBeenCalledWith({
+      where: {
+        userId: "user-2",
+        revokedAt: null
+      },
+      data: {
+        revokedAt: expect.any(Date)
+      }
+    });
+  });
+
+  it("resets password and revokes active sessions", async () => {
+    const prisma = {
+      user: {
+        findUnique: vi.fn().mockResolvedValue({
+          id: "user-3",
+          email: "user@nppweb.local",
+          deletedAt: null,
+          isActive: true
+        }),
+        update: vi.fn().mockResolvedValue({
+          id: "user-3",
+          email: "user@nppweb.local",
+          role: UserRole.USER,
+          isActive: true
+        })
+      },
+      userSession: {
+        updateMany: vi.fn().mockResolvedValue({ count: 1 })
+      }
+    };
+    const authService = {
+      hashPassword: vi.fn().mockResolvedValue("new-hash")
+    };
+    const auditService = {
+      record: vi.fn().mockResolvedValue(undefined)
+    };
+
+    const service = new UsersService(prisma as never, authService as never, auditService as never);
+
+    const result = await service.resetUserPassword("user-3", "new-password", actor);
+
+    expect(result).toMatchObject({ id: "user-3", email: "user@nppweb.local" });
+    expect(authService.hashPassword).toHaveBeenCalledWith("new-password");
+    expect(prisma.user.update).toHaveBeenCalledWith({
+      where: { id: "user-3" },
+      data: { passwordHash: "new-hash" }
+    });
+    expect(prisma.userSession.updateMany).toHaveBeenCalled();
+    expect(auditService.record).toHaveBeenCalledWith(
+      AuditAction.USER_PASSWORD_CHANGED,
+      "User",
+      "user-3",
+      { actorId: actor.id, resetByAdmin: true },
+      expect.objectContaining({ userId: actor.id })
+    );
   });
 });

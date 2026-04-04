@@ -1,7 +1,7 @@
 import { Controller, Get, Header } from "@nestjs/common";
 import { collectDefaultMetrics, register } from "prom-client";
 
-collectDefaultMetrics({ register, prefix: "aimsora_backend_" });
+collectDefaultMetrics({ register, prefix: "nppweb_backend_" });
 
 @Controller("metrics")
 export class MetricsController {

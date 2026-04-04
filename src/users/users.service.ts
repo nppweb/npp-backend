@@ -23,10 +23,47 @@ export class UsersService {
     return this.requireActiveUser(userId);
   }
 
+  async updateProfile(
+    userId: string,
+    input: { email: string; fullName: string; avatarUrl?: string | null }
+  ) {
+    const user = await this.requireActiveUser(userId);
+    const normalizedEmail = input.email.trim().toLowerCase();
+    const fullName = input.fullName.trim();
+
+    const existingByEmail = await this.prisma.user.findUnique({
+      where: { email: normalizedEmail }
+    });
+
+    if (existingByEmail && existingByEmail.id !== user.id && !existingByEmail.deletedAt) {
+      throw new ConflictException("User with this email already exists");
+    }
+
+    const avatarUrl =
+      input.avatarUrl === undefined
+        ? user.avatarUrl
+        : input.avatarUrl && input.avatarUrl.trim().length > 0
+          ? input.avatarUrl.trim()
+          : null;
+
+    if (avatarUrl && avatarUrl.length > 2_000_000) {
+      throw new ConflictException("Avatar image is too large");
+    }
+
+    return this.prisma.user.update({
+      where: { id: user.id },
+      data: {
+        email: normalizedEmail,
+        fullName,
+        avatarUrl
+      }
+    });
+  }
+
   listUsers() {
     return this.prisma.user.findMany({
       where: { deletedAt: null },
-      orderBy: [{ role: "desc" }, { createdAt: "desc" }]
+      orderBy: [{ isActive: "desc" }, { role: "desc" }, { createdAt: "desc" }]
     });
   }
 
@@ -79,7 +116,7 @@ export class UsersService {
     actor: AuthenticatedUser,
     request?: RequestLike
   ) {
-    await this.requireActiveUser(userId);
+    await this.requireExistingUser(userId);
 
     const updated = await this.prisma.user.update({
       where: { id: userId },
@@ -102,15 +139,15 @@ export class UsersService {
       throw new ConflictException("You cannot deactivate your own account");
     }
 
-    await this.requireActiveUser(userId);
+    await this.requireExistingUser(userId);
 
     const user = await this.prisma.user.update({
       where: { id: userId },
       data: {
-        isActive: false,
-        deletedAt: new Date()
+        isActive: false
       }
     });
+    await this.revokeUserSessions(user.id);
 
     await this.auditService.record(
       AuditAction.USER_ROLE_UPDATED,
@@ -123,13 +160,93 @@ export class UsersService {
     return true;
   }
 
+  async setUserActive(
+    userId: string,
+    isActive: boolean,
+    actor: AuthenticatedUser,
+    request?: RequestLike
+  ) {
+    const existingUser = await this.requireExistingUser(userId);
+
+    if (existingUser.id === actor.id && !isActive) {
+      throw new ConflictException("You cannot deactivate your own account");
+    }
+
+    const user = await this.prisma.user.update({
+      where: { id: userId },
+      data: { isActive }
+    });
+
+    if (!isActive) {
+      await this.revokeUserSessions(user.id);
+    }
+
+    await this.auditService.record(
+      AuditAction.USER_ROLE_UPDATED,
+      "User",
+      user.id,
+      { actorId: actor.id, isActive },
+      this.buildAuditContext(actor, request)
+    );
+
+    return user;
+  }
+
+  async resetUserPassword(
+    userId: string,
+    newPassword: string,
+    actor: AuthenticatedUser,
+    request?: RequestLike
+  ) {
+    await this.requireExistingUser(userId);
+
+    const passwordHash = await this.authService.hashPassword(newPassword);
+    const user = await this.prisma.user.update({
+      where: { id: userId },
+      data: { passwordHash }
+    });
+
+    await this.revokeUserSessions(user.id);
+
+    await this.auditService.record(
+      AuditAction.USER_PASSWORD_CHANGED,
+      "User",
+      user.id,
+      { actorId: actor.id, resetByAdmin: true },
+      this.buildAuditContext(actor, request)
+    );
+
+    return user;
+  }
+
   private async requireActiveUser(userId: string) {
+    const user = await this.prisma.user.findUnique({ where: { id: userId } });
+    if (!user || user.deletedAt || !user.isActive) {
+      throw new NotFoundException("User not found");
+    }
+
+    return user;
+  }
+
+  private async requireExistingUser(userId: string) {
     const user = await this.prisma.user.findUnique({ where: { id: userId } });
     if (!user || user.deletedAt) {
       throw new NotFoundException("User not found");
     }
 
     return user;
+  }
+
+  private async revokeUserSessions(userId: string) {
+    await this.prisma.userSession.updateMany({
+      where: {
+        userId,
+        revokedAt: null
+      },
+      data: {
+        revokedAt: new Date()
+      }
+    });
   }
 
   private buildAuditContext(actor: AuthenticatedUser, request?: RequestLike) {

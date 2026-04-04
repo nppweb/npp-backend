@@ -14,6 +14,7 @@ import { extractRequestContext } from "../common/request-context";
 import { toJson, toNullableJson } from "../prisma/json";
 import { PrismaService } from "../prisma/prisma.service";
 import type { IngestResult } from "../procurement/models";
+import { getSourceCatalogItem } from "../sources/source-catalog";
 import type { IngestSupplierRiskSignalInput } from "./models";
 
 @Injectable()
@@ -56,15 +57,22 @@ export class SupplierRiskService {
     }
 
     const result = await this.prisma.$transaction(async (tx) => {
+      const sourceCatalogItem = getSourceCatalogItem(input.source);
       const source = await tx.source.upsert({
         where: { code: input.source },
         update: {
-          isActive: true
+          isActive: true,
+          name: sourceCatalogItem?.name ?? input.source,
+          description: sourceCatalogItem?.description,
+          kind: sourceCatalogItem?.kind ?? SourceKind.FEDRESURS,
+          baseUrl: sourceCatalogItem?.baseUrl
         },
         create: {
           code: input.source,
-          name: input.source,
-          kind: SourceKind.FEDRESURS
+          name: sourceCatalogItem?.name ?? input.source,
+          description: sourceCatalogItem?.description,
+          kind: sourceCatalogItem?.kind ?? SourceKind.FEDRESURS,
+          baseUrl: sourceCatalogItem?.baseUrl
         }
       });
 

@@ -11,11 +11,39 @@ import { hash } from "bcryptjs";
 
 const prisma = new PrismaClient();
 
+async function upsertSource(input: {
+  code: string;
+  name: string;
+  kind: SourceKind;
+  baseUrl: string;
+  description: string;
+}) {
+  return prisma.source.upsert({
+    where: { code: input.code },
+    update: {
+      name: input.name,
+      kind: input.kind,
+      baseUrl: input.baseUrl,
+      description: input.description,
+      isActive: true,
+      deletedAt: null
+    },
+    create: {
+      code: input.code,
+      name: input.name,
+      kind: input.kind,
+      baseUrl: input.baseUrl,
+      description: input.description,
+      isActive: true
+    }
+  });
+}
+
 async function main() {
   const defaultPasswordHash = await hash("12345678", 12);
   const optionalAdminEmail = process.env.ADMIN_EMAIL?.toLowerCase();
   const optionalAdminPassword = process.env.ADMIN_PASSWORD;
-  const optionalAdminFullName = process.env.ADMIN_FULL_NAME ?? "AIMSORA Administrator";
+  const optionalAdminFullName = process.env.ADMIN_FULL_NAME ?? "NPPWEB Administrator";
 
   const admin = await prisma.user.upsert({
     where: { email: "admin@admin.ru" },
@@ -37,7 +65,7 @@ async function main() {
   await prisma.user.upsert({
     where: { email: "analyst@admin.ru" },
     update: {
-      fullName: "Demo Analyst",
+      fullName: "Lead Analyst",
       role: UserRole.ANALYST,
       isActive: true,
       deletedAt: null,
@@ -45,8 +73,25 @@ async function main() {
     },
     create: {
       email: "analyst@admin.ru",
-      fullName: "Demo Analyst",
+      fullName: "Lead Analyst",
       role: UserRole.ANALYST,
+      passwordHash: defaultPasswordHash
+    }
+  });
+
+  await prisma.user.upsert({
+    where: { email: "developer@admin.ru" },
+    update: {
+      fullName: "Platform Developer",
+      role: UserRole.DEVELOPER,
+      isActive: true,
+      deletedAt: null,
+      passwordHash: defaultPasswordHash
+    },
+    create: {
+      email: "developer@admin.ru",
+      fullName: "Platform Developer",
+      role: UserRole.DEVELOPER,
       passwordHash: defaultPasswordHash
     }
   });
@@ -54,7 +99,7 @@ async function main() {
   await prisma.user.upsert({
     where: { email: "user@admin.ru" },
     update: {
-      fullName: "Demo User",
+      fullName: "Platform User",
       role: UserRole.USER,
       isActive: true,
       deletedAt: null,
@@ -62,13 +107,15 @@ async function main() {
     },
     create: {
       email: "user@admin.ru",
-      fullName: "Demo User",
+      fullName: "Platform User",
       role: UserRole.USER,
       passwordHash: defaultPasswordHash
     }
   });
 
   if (optionalAdminEmail && optionalAdminPassword && optionalAdminEmail !== "admin@admin.ru") {
+    const optionalAdminPasswordHash = await hash(optionalAdminPassword, 12);
+
     await prisma.user.upsert({
       where: { email: optionalAdminEmail },
       update: {
@@ -76,55 +123,68 @@ async function main() {
         role: UserRole.ADMIN,
         isActive: true,
         deletedAt: null,
-        passwordHash: await hash(optionalAdminPassword, 12)
+        passwordHash: optionalAdminPasswordHash
       },
       create: {
         email: optionalAdminEmail,
         fullName: optionalAdminFullName,
         role: UserRole.ADMIN,
-        passwordHash: await hash(optionalAdminPassword, 12)
+        passwordHash: optionalAdminPasswordHash
       }
     });
   }
 
-  const demoSource = await prisma.source.upsert({
-    where: { code: "demo-source" },
-    update: {
-      name: "Demo Source",
-      kind: SourceKind.DEMO,
-      baseUrl: "https://example.org",
-      isActive: true,
-      deletedAt: null,
-      description: "Safe demo adapter used for local verification."
+  await prisma.source.updateMany({
+    where: {
+      code: { in: ["demo-source", "find-tender"] }
     },
-    create: {
-      code: "demo-source",
-      name: "Demo Source",
-      kind: SourceKind.DEMO,
-      baseUrl: "https://example.org",
-      isActive: true,
-      description: "Safe demo adapter used for local verification."
+    data: {
+      isActive: false,
+      deletedAt: new Date()
     }
   });
 
-  const findTenderSource = await prisma.source.upsert({
-    where: { code: "find-tender" },
-    update: {
-      name: "Find a Tender (UK)",
-      kind: SourceKind.FIND_TENDER,
-      baseUrl: "https://www.find-tender.service.gov.uk",
-      isActive: true,
-      deletedAt: null,
-      description: "Official public OCDS procurement API used as the production-grade example adapter."
-    },
-    create: {
-      code: "find-tender",
-      name: "Find a Tender (UK)",
-      kind: SourceKind.FIND_TENDER,
-      baseUrl: "https://www.find-tender.service.gov.uk",
-      isActive: true,
-      description: "Official public OCDS procurement API used as the production-grade example adapter."
-    }
+  const easuzSource = await upsertSource({
+    code: "easuz",
+    name: "ЕАСУЗ Московской области",
+    kind: SourceKind.EASUZ,
+    baseUrl: "https://easuz.mosreg.ru",
+    description: "Региональный источник закупок Московской области."
+  });
+  const eisSource = await upsertSource({
+    code: "eis",
+    name: "ЕИС / zakupki.gov.ru",
+    kind: SourceKind.EIS,
+    baseUrl: "https://zakupki.gov.ru",
+    description: "Федеральный источник закупок ЕИС."
+  });
+  const rnpSource = await upsertSource({
+    code: "rnp",
+    name: "Реестр недобросовестных поставщиков",
+    kind: SourceKind.RNP,
+    baseUrl: "https://zakupki.gov.ru",
+    description: "Реестр недобросовестных поставщиков."
+  });
+  const fedresursSource = await upsertSource({
+    code: "fedresurs",
+    name: "Федресурс",
+    kind: SourceKind.FEDRESURS,
+    baseUrl: "https://bankrot.fedresurs.ru",
+    description: "Источник риск-сигналов о банкротстве и иных событиях."
+  });
+  const fnsSource = await upsertSource({
+    code: "fns",
+    name: "ФНС ЕГРЮЛ/ЕГРИП",
+    kind: SourceKind.FNS,
+    baseUrl: "https://egrul.nalog.ru",
+    description: "Источник регистрационных и корпоративных данных."
+  });
+  const gistorgiSource = await upsertSource({
+    code: "gistorgi",
+    name: "ГИС Торги",
+    kind: SourceKind.GISTORGI,
+    baseUrl: "https://torgi.gov.ru",
+    description: "Источник лотов и торгов с torgi.gov.ru."
   });
 
   const alfaSupplier = await prisma.supplier.upsert({
@@ -155,59 +215,72 @@ async function main() {
     }
   });
 
-  const acmeSupplier = await prisma.supplier.upsert({
-    where: { normalizedName: "acme analytics" },
+  const gammaSupplier = await prisma.supplier.upsert({
+    where: { normalizedName: "ooo gamma" },
     update: {
-      name: "Acme Analytics",
-      metadata: { country: "UK", source: "seed" },
+      name: "ООО Гамма",
+      metadata: { country: "RU", source: "seed" },
       deletedAt: null
     },
     create: {
-      name: "Acme Analytics",
-      normalizedName: "acme analytics",
-      metadata: { country: "UK", source: "seed" }
+      name: "ООО Гамма",
+      normalizedName: "ooo gamma",
+      metadata: { country: "RU", source: "seed" }
     }
   });
 
   const sourceRuns = [
     {
-      runKey: "demo-source:2026-03-29T09:00:00.000Z",
-      sourceId: demoSource.id,
-      status: SourceRunStatus.SUCCESS,
-      startedAt: new Date("2026-03-29T09:00:00.000Z"),
-      finishedAt: new Date("2026-03-29T09:06:00.000Z"),
-      triggeredById: admin.id,
-      itemsDiscovered: 4,
-      itemsPublished: 3,
-      itemsFailed: 1,
-      errorMessage: null,
-      metadata: { mode: "seed", channel: "demo" }
-    },
-    {
-      runKey: "find-tender:2026-03-30T11:00:00.000Z",
-      sourceId: findTenderSource.id,
+      runKey: "eis:2026-03-30T11:00:00.000Z",
+      sourceId: eisSource.id,
       status: SourceRunStatus.SUCCESS,
       startedAt: new Date("2026-03-30T11:00:00.000Z"),
       finishedAt: new Date("2026-03-30T11:08:00.000Z"),
       triggeredById: admin.id,
       itemsDiscovered: 8,
-      itemsPublished: 8,
-      itemsFailed: 0,
+      itemsPublished: 7,
+      itemsFailed: 1,
       errorMessage: null,
-      metadata: { mode: "seed", channel: "find-tender" }
+      metadata: { mode: "seed", channel: "eis" }
     },
     {
-      runKey: "find-tender:2026-03-31T07:00:00.000Z",
-      sourceId: findTenderSource.id,
-      status: SourceRunStatus.FAILED,
+      runKey: "easuz:2026-03-31T07:00:00.000Z",
+      sourceId: easuzSource.id,
+      status: SourceRunStatus.PARTIAL,
       startedAt: new Date("2026-03-31T07:00:00.000Z"),
-      finishedAt: new Date("2026-03-31T07:04:00.000Z"),
+      finishedAt: new Date("2026-03-31T07:06:00.000Z"),
       triggeredById: admin.id,
-      itemsDiscovered: 2,
-      itemsPublished: 0,
+      itemsDiscovered: 5,
+      itemsPublished: 3,
       itemsFailed: 2,
-      errorMessage: "Temporary upstream schema mismatch",
-      metadata: { mode: "seed", channel: "find-tender" }
+      errorMessage: "Часть карточек не прошла нормализацию",
+      metadata: { mode: "seed", channel: "easuz" }
+    },
+    {
+      runKey: "gistorgi:2026-04-01T09:00:00.000Z",
+      sourceId: gistorgiSource.id,
+      status: SourceRunStatus.SUCCESS,
+      startedAt: new Date("2026-04-01T09:00:00.000Z"),
+      finishedAt: new Date("2026-04-01T09:03:00.000Z"),
+      triggeredById: admin.id,
+      itemsDiscovered: 4,
+      itemsPublished: 4,
+      itemsFailed: 0,
+      errorMessage: null,
+      metadata: { mode: "seed", channel: "gistorgi" }
+    },
+    {
+      runKey: "fedresurs:2026-04-01T10:30:00.000Z",
+      sourceId: fedresursSource.id,
+      status: SourceRunStatus.SUCCESS,
+      startedAt: new Date("2026-04-01T10:30:00.000Z"),
+      finishedAt: new Date("2026-04-01T10:32:00.000Z"),
+      triggeredById: admin.id,
+      itemsDiscovered: 3,
+      itemsPublished: 3,
+      itemsFailed: 0,
+      errorMessage: null,
+      metadata: { mode: "seed", channel: "fedresurs" }
     }
   ];
 
@@ -221,88 +294,74 @@ async function main() {
 
   const procurements = [
     {
-      externalId: "DEMO-2026-001",
-      sourceId: demoSource.id,
+      externalId: "EIS-2026-001",
+      sourceId: eisSource.id,
       supplierId: alfaSupplier.id,
       title: "Поставка серверного оборудования",
-      description: "Закупка стоечного оборудования для дата-центра.",
+      description: "Закупка стоечного оборудования для регионального дата-центра.",
       customerName: "ГУП Технопарк",
       amount: 1250000,
       currency: "RUB",
       publishedAt: new Date("2026-03-24T09:00:00.000Z"),
       deadlineAt: new Date("2026-04-04T18:00:00.000Z"),
       status: ProcurementStatus.ACTIVE,
-      sourceUrl: "https://example.org/procurements/demo-2026-001"
+      sourceUrl: "https://zakupki.gov.ru/epz/order/notice/ea44/view/common-info.html?regNumber=EIS-2026-001"
     },
     {
-      externalId: "DEMO-2026-002",
-      sourceId: demoSource.id,
+      externalId: "EIS-2026-002",
+      sourceId: eisSource.id,
       supplierId: betaSupplier.id,
       title: "Техническая поддержка контакт-центра",
-      description: "Годовой контракт на поддержку 24/7.",
+      description: "Годовой контракт на поддержку сервисов 24/7.",
       customerName: "МФЦ Город",
       amount: 540000,
       currency: "RUB",
       publishedAt: new Date("2026-03-26T12:30:00.000Z"),
       deadlineAt: new Date("2026-03-31T15:00:00.000Z"),
       status: ProcurementStatus.CLOSED,
-      sourceUrl: "https://example.org/procurements/demo-2026-002"
+      sourceUrl: "https://zakupki.gov.ru/epz/order/notice/ea44/view/common-info.html?regNumber=EIS-2026-002"
     },
     {
-      externalId: "DEMO-2026-003",
-      sourceId: demoSource.id,
-      supplierId: null,
-      title: "Пилотный R&D тендер",
-      description: "Черновая публикация для внутреннего сценария.",
-      customerName: "Инновационный фонд",
-      amount: 210000,
+      externalId: "EASUZ-2026-015",
+      sourceId: easuzSource.id,
+      supplierId: gammaSupplier.id,
+      title: "Разработка модуля аналитической отчётности",
+      description: "Развитие региональной платформы аналитики закупок.",
+      customerName: "Комитет цифрового развития МО",
+      amount: 2985000,
       currency: "RUB",
       publishedAt: new Date("2026-03-30T08:00:00.000Z"),
       deadlineAt: new Date("2026-04-10T17:00:00.000Z"),
-      status: ProcurementStatus.DRAFT,
-      sourceUrl: "https://example.org/procurements/demo-2026-003"
+      status: ProcurementStatus.ACTIVE,
+      sourceUrl: "https://easuz.mosreg.ru/tenders/EASUZ-2026-015"
     },
     {
-      externalId: "FAT-2026-100",
-      sourceId: findTenderSource.id,
-      supplierId: acmeSupplier.id,
-      title: "Regional analytics platform rollout",
-      description: "Cross-region analytics and compliance reporting rollout.",
-      customerName: "North Borough Council",
-      amount: 985000,
-      currency: "GBP",
+      externalId: "GISTORGI-2026-041",
+      sourceId: gistorgiSource.id,
+      supplierId: null,
+      title: "Аукцион на аренду имущественного комплекса",
+      description: "Публичные торги по имущественному комплексу муниципального уровня.",
+      customerName: "Администрация городского округа",
+      amount: 870000,
+      currency: "RUB",
       publishedAt: new Date("2026-03-29T10:15:00.000Z"),
       deadlineAt: new Date("2026-04-05T12:00:00.000Z"),
       status: ProcurementStatus.ACTIVE,
-      sourceUrl: "https://www.find-tender.service.gov.uk/Notice/FAT-2026-100"
+      sourceUrl: "https://torgi.gov.ru/new/public/lots/lot/GISTORGI-2026-041"
     },
     {
-      externalId: "FAT-2026-101",
-      sourceId: findTenderSource.id,
-      supplierId: acmeSupplier.id,
-      title: "Legacy contract migration audit",
-      description: "Archived historical procurement used for dashboard history.",
-      customerName: "South Borough Council",
+      externalId: "GISTORGI-2026-042",
+      sourceId: gistorgiSource.id,
+      supplierId: betaSupplier.id,
+      title: "Закрытый аукцион на складскую инфраструктуру",
+      description: "Архивная запись завершённых торгов для исторической аналитики.",
+      customerName: "ГУП Логистика региона",
       amount: 315000,
-      currency: "GBP",
+      currency: "RUB",
       publishedAt: new Date("2026-03-20T08:45:00.000Z"),
       deadlineAt: new Date("2026-03-24T12:00:00.000Z"),
       status: ProcurementStatus.ARCHIVED,
-      sourceUrl: "https://www.find-tender.service.gov.uk/Notice/FAT-2026-101"
-    },
-    {
-      externalId: "FAT-2026-102",
-      sourceId: findTenderSource.id,
-      supplierId: betaSupplier.id,
-      title: "Cloud support framework",
-      description: "Closed procurement for cloud support and observability.",
-      customerName: "Central Health Agency",
-      amount: 730000,
-      currency: "GBP",
-      publishedAt: new Date("2026-03-31T07:30:00.000Z"),
-      deadlineAt: new Date("2026-04-07T12:00:00.000Z"),
-      status: ProcurementStatus.CLOSED,
-      sourceUrl: "https://www.find-tender.service.gov.uk/Notice/FAT-2026-102"
+      sourceUrl: "https://torgi.gov.ru/new/public/lots/lot/GISTORGI-2026-042"
     }
   ];
 
@@ -335,11 +394,11 @@ async function main() {
     });
   }
 
-  const fat102 = await prisma.procurement.findUniqueOrThrow({
+  const gistorgiProcurement = await prisma.procurement.findUniqueOrThrow({
     where: {
       sourceId_externalId: {
-        sourceId: findTenderSource.id,
-        externalId: "FAT-2026-102"
+        sourceId: gistorgiSource.id,
+        externalId: "GISTORGI-2026-042"
       }
     }
   });
@@ -348,21 +407,21 @@ async function main() {
     {
       id: "00000000-0000-0000-0000-000000000001",
       name: "Daily Procurement Overview",
-      description: "Snapshot for the main dashboard cards and trends.",
+      description: "Ежедневный обзор закупок и активности источников.",
       status: ReportStatus.READY,
       metadata: { generatedBy: "seed", type: "daily-overview" }
     },
     {
       id: "00000000-0000-0000-0000-000000000002",
       name: "Supplier Risk Watch",
-      description: "Demo analytical report for supplier monitoring.",
+      description: "Отчёт по отслеживанию рисков и контрагентов.",
       status: ReportStatus.READY,
       metadata: { generatedBy: "seed", type: "supplier-risk" }
     },
     {
       id: "00000000-0000-0000-0000-000000000003",
       name: "Pipeline Incident Digest",
-      description: "Failed and partial ingest runs for troubleshooting.",
+      description: "Сводка частичных и неуспешных прогонов сборщиков.",
       status: ReportStatus.FAILED,
       metadata: { generatedBy: "seed", type: "pipeline-incident" }
     }
@@ -402,8 +461,8 @@ async function main() {
       userId: admin.id,
       action: AuditAction.PROCUREMENT_INGESTED,
       entityType: "Procurement",
-      entityId: fat102.id,
-      details: { seed: true, source: "find-tender", externalId: "FAT-2026-102" },
+      entityId: gistorgiProcurement.id,
+      details: { seed: true, source: "gistorgi", externalId: "GISTORGI-2026-042" },
       ipAddress: "127.0.0.1",
       userAgent: "seed-script"
     },
@@ -426,6 +485,17 @@ async function main() {
       create: auditLog
     });
   }
+
+  await prisma.procurement.updateMany({
+    where: {
+      source: {
+        code: { in: ["demo-source", "find-tender"] }
+      }
+    },
+    data: {
+      deletedAt: new Date()
+    }
+  });
 }
 
 main()

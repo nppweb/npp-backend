@@ -16,6 +16,8 @@ export const envSchema = z.object({
   NODE_ENV: z.enum(["development", "test", "production"]).default("development"),
   PORT: z.coerce.number().int().positive().default(3000),
   GRAPHQL_PATH: z.string().default("/graphql"),
+  SCRAPER_CONTROL_URL: z.string().url().default("http://scraper-service:3001"),
+  SCRAPE_SCHEDULE: z.string().default("*/20 * * * *"),
   DATABASE_URL: z.string().min(1),
   JWT_ACCESS_SECRET: z.string().min(16),
   JWT_ACCESS_TTL: z.string().default("15m"),
@@ -27,6 +29,10 @@ export const envSchema = z.object({
   LOG_LEVEL: z.string().default("info"),
   THROTTLE_TTL_MS: z.coerce.number().int().positive().default(60000),
   THROTTLE_LIMIT: z.coerce.number().int().positive().default(120),
+  ENABLED_SOURCES: z
+    .string()
+    .optional()
+    .transform((value) => parseStringList(value, [])),
   CORS_ALLOWED_ORIGINS: z
     .string()
     .optional()

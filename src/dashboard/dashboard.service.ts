@@ -1,12 +1,22 @@
 import { Injectable } from "@nestjs/common";
+import { ConfigService } from "@nestjs/config";
 import { ProcurementStatus } from "@prisma/client";
 import { PrismaService } from "../prisma/prisma.service";
+import { syncEnabledSourcesCatalog } from "../sources/source-catalog";
 
 @Injectable()
 export class DashboardService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly configService: ConfigService
+  ) {}
 
   async summary() {
+    await syncEnabledSourcesCatalog(
+      this.prisma,
+      this.configService.get<string[]>("ENABLED_SOURCES") ?? []
+    );
+
     const last24Hours = new Date(Date.now() - 24 * 60 * 60 * 1000);
     const timelineWindowDays = 14;
     const timelineStart = new Date(Date.now() - (timelineWindowDays - 1) * 24 * 60 * 60 * 1000);
@@ -30,11 +40,13 @@ export class DashboardService {
       this.prisma.registryRecord.count(),
       this.prisma.supplierRiskSignal.count(),
       this.prisma.supplierCompanyProfile.count(),
-      this.prisma.procurement.count({ where: { deletedAt: null } }),
+      this.prisma.procurement.count({ where: { deletedAt: null, source: { deletedAt: null } } }),
       this.prisma.source.count({ where: { deletedAt: null, isActive: true } }),
-      this.prisma.sourceRun.count({ where: { startedAt: { gte: last24Hours } } }),
+      this.prisma.sourceRun.count({
+        where: { startedAt: { gte: last24Hours }, source: { deletedAt: null } }
+      }),
       this.prisma.procurement.findFirst({
-        where: { deletedAt: null },
+        where: { deletedAt: null, source: { deletedAt: null } },
         orderBy: [{ publishedAt: "desc" }, { createdAt: "desc" }],
         select: { publishedAt: true }
       }),
@@ -67,18 +79,19 @@ export class DashboardService {
       }),
       this.prisma.procurement.groupBy({
         by: ["status"],
-        where: { deletedAt: null },
+        where: { deletedAt: null, source: { deletedAt: null } },
         _count: { _all: true }
       }),
       this.prisma.procurement.findMany({
         where: {
           deletedAt: null,
+          source: { deletedAt: null },
           publishedAt: { not: null, gte: timelineStart }
         },
         select: { publishedAt: true }
       }),
       this.prisma.procurement.findMany({
-        where: { deletedAt: null },
+        where: { deletedAt: null, source: { deletedAt: null } },
         take: 5,
         orderBy: [{ publishedAt: "desc" }, { createdAt: "desc" }],
         include: {
@@ -87,6 +100,7 @@ export class DashboardService {
         }
       }),
       this.prisma.sourceRun.findMany({
+        where: { source: { deletedAt: null } },
         take: 5,
         orderBy: { startedAt: "desc" },
         include: { source: true }
@@ -103,14 +117,14 @@ export class DashboardService {
           item._count.supplierCompanyProfiles;
 
         return {
-        source: item.code,
-        name: item.name,
-        kind: item.kind,
-        isActive: item.isActive,
-        procurementCount: item._count.procurements,
-        recordCount,
-        runCount: item._count.runs,
-        lastRunAt: item.runs[0]?.startedAt ?? null
+          source: item.code,
+          name: item.name,
+          kind: item.kind,
+          isActive: item.isActive,
+          procurementCount: item._count.procurements,
+          recordCount,
+          runCount: item._count.runs,
+          lastRunAt: item.runs[0]?.startedAt ?? null
         };
       })
       .sort((left, right) => right.recordCount - left.recordCount);

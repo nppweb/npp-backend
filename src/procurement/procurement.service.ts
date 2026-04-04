@@ -13,6 +13,7 @@ import type { RequestLike } from "../common/request-context";
 import { extractRequestContext } from "../common/request-context";
 import { toJson, toNullableJson } from "../prisma/json";
 import { PrismaService } from "../prisma/prisma.service";
+import { getSourceCatalogItem } from "../sources/source-catalog";
 import {
   IngestNormalizedItemInput,
   IngestResult,
@@ -38,7 +39,7 @@ export class ProcurementService {
   ): Promise<ProcurementItemPage> {
     const where = {
       deletedAt: null,
-      source: filter?.source ? { code: filter.source } : undefined,
+      source: filter?.source ? { code: filter.source, deletedAt: null } : { deletedAt: null },
       status: filter?.status,
       OR: filter?.search
         ? [
@@ -79,7 +80,7 @@ export class ProcurementService {
 
   async findById(id: string): Promise<ProcurementItem | null> {
     const item = await this.prisma.procurement.findFirst({
-      where: { id, deletedAt: null },
+      where: { id, deletedAt: null, source: { deletedAt: null } },
       include: { source: true, supplier: true }
     });
 
@@ -126,15 +127,22 @@ export class ProcurementService {
     }
 
     const result = await this.prisma.$transaction(async (tx) => {
+      const sourceCatalogItem = getSourceCatalogItem(input.source);
       const source = await tx.source.upsert({
         where: { code: input.source },
         update: {
-          isActive: true
+          isActive: true,
+          kind: sourceCatalogItem?.kind ?? toSourceKind(input.source),
+          name: sourceCatalogItem?.name ?? input.source,
+          description: sourceCatalogItem?.description,
+          baseUrl: sourceCatalogItem?.baseUrl
         },
         create: {
           code: input.source,
-          name: input.source,
-          kind: toSourceKind(input.source)
+          name: sourceCatalogItem?.name ?? input.source,
+          description: sourceCatalogItem?.description,
+          kind: sourceCatalogItem?.kind ?? toSourceKind(input.source),
+          baseUrl: sourceCatalogItem?.baseUrl
         }
       });
 
@@ -347,8 +355,6 @@ export class ProcurementService {
 
 function toSourceKind(source: string): SourceKind {
   switch (source) {
-    case "find-tender":
-      return SourceKind.FIND_TENDER;
     case "easuz":
       return SourceKind.EASUZ;
     case "eis":
@@ -362,6 +368,6 @@ function toSourceKind(source: string): SourceKind {
     case "gistorgi":
       return SourceKind.GISTORGI;
     default:
-      return SourceKind.DEMO;
+      throw new Error(`Unsupported source kind mapping for "${source}"`);
   }
 }

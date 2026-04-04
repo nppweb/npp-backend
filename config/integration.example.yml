@@ -5,7 +5,7 @@ services:
     source_raw: source.raw.v1
     source_normalized: source.normalized.v1
   contracts_repo:
-    local_path: ../shared-contracts
+    local_path: ../contracts
 dependencies:
   postgres: postgresql://app:app@postgres:5432/procurement
   redis: redis://redis:6379

@@ -33,7 +33,7 @@ export class AuthService {
     const user = await this.prisma.user.findFirst({
       where: {
         email: email.toLowerCase(),
-        deletedAt: null
+      deletedAt: null
       }
     });
 
@@ -45,6 +45,7 @@ export class AuthService {
       id: user.id,
       email: user.email,
       fullName: user.fullName,
+      avatarUrl: user.avatarUrl,
       role: user.role
     }, request);
 
@@ -88,6 +89,7 @@ export class AuthService {
         id: session.user.id,
         email: session.user.email,
         fullName: session.user.fullName,
+        avatarUrl: session.user.avatarUrl,
         role: session.user.role
       },
       request
@@ -184,6 +186,7 @@ export class AuthService {
       id: user.id,
       email: user.email,
       fullName: user.fullName,
+      avatarUrl: user.avatarUrl,
       role: user.role
     };
   }

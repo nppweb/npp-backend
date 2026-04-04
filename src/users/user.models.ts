@@ -1,6 +1,6 @@
 import { Field, ID, InputType, ObjectType } from "@nestjs/graphql";
 import { UserRole } from "@prisma/client";
-import { IsEmail, IsEnum, IsString, MinLength } from "class-validator";
+import { IsBoolean, IsEmail, IsEnum, IsOptional, IsString, MinLength } from "class-validator";
 import { registerEnumType } from "@nestjs/graphql";
 
 registerEnumType(UserRole, { name: "UserRole" });
@@ -15,6 +15,9 @@ export class User {
 
   @Field()
   fullName!: string;
+
+  @Field(() => String, { nullable: true })
+  avatarUrl?: string | null;
 
   @Field(() => UserRole)
   role!: UserRole;
@@ -63,4 +66,46 @@ export class UpdateUserRoleInput {
   @Field(() => UserRole)
   @IsEnum(UserRole)
   role!: UserRole;
+}
+
+@InputType()
+export class SetUserActiveInput {
+  @Field(() => ID)
+  @IsString()
+  @MinLength(1)
+  userId!: string;
+
+  @Field()
+  @IsBoolean()
+  isActive!: boolean;
+}
+
+@InputType()
+export class ResetUserPasswordInput {
+  @Field(() => ID)
+  @IsString()
+  @MinLength(1)
+  userId!: string;
+
+  @Field()
+  @IsString()
+  @MinLength(5)
+  newPassword!: string;
+}
+
+@InputType()
+export class UpdateProfileInput {
+  @Field()
+  @IsEmail()
+  email!: string;
+
+  @Field()
+  @IsString()
+  @MinLength(3)
+  fullName!: string;
+
+  @Field(() => String, { nullable: true })
+  @IsOptional()
+  @IsString()
+  avatarUrl?: string | null;
 }
