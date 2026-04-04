@@ -12,7 +12,7 @@ import { hash } from "bcryptjs";
 const prisma = new PrismaClient();
 
 async function main() {
-  const defaultPasswordHash = await hash("admin", 12);
+  const defaultPasswordHash = await hash("12345678", 12);
   const optionalAdminEmail = process.env.ADMIN_EMAIL?.toLowerCase();
   const optionalAdminPassword = process.env.ADMIN_PASSWORD;
   const optionalAdminFullName = process.env.ADMIN_FULL_NAME ?? "AIMSORA Administrator";
@@ -20,7 +20,7 @@ async function main() {
   const admin = await prisma.user.upsert({
     where: { email: "admin@admin.ru" },
     update: {
-      fullName: "Local Administrator",
+      fullName: "Super Administrator",
       role: UserRole.ADMIN,
       isActive: true,
       deletedAt: null,
@@ -28,7 +28,7 @@ async function main() {
     },
     create: {
       email: "admin@admin.ru",
-      fullName: "Local Administrator",
+      fullName: "Super Administrator",
       role: UserRole.ADMIN,
       passwordHash: defaultPasswordHash
     }

@@ -13,83 +13,17 @@ import type { RequestLike } from "../common/request-context";
 import { extractRequestContext } from "../common/request-context";
 import { toJson, toNullableJson } from "../prisma/json";
 import { PrismaService } from "../prisma/prisma.service";
-import {
-  IngestNormalizedItemInput,
-  IngestResult,
-  ProcurementFilterInput,
-  ProcurementItem,
-  ProcurementSortField,
-  ProcurementSortInput,
-  ProcurementItemPage
-} from "./models";
+import type { IngestResult } from "../procurement/models";
+import type { IngestAuctionItemInput } from "./models";
 
 @Injectable()
-export class ProcurementService {
+export class AuctionService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly auditService: AuditService
   ) {}
 
-  async find(
-    filter?: ProcurementFilterInput,
-    sort?: ProcurementSortInput,
-    limit = 20,
-    offset = 0
-  ): Promise<ProcurementItemPage> {
-    const where = {
-      deletedAt: null,
-      source: filter?.source ? { code: filter.source } : undefined,
-      status: filter?.status,
-      OR: filter?.search
-        ? [
-            { title: { contains: filter.search, mode: "insensitive" as const } },
-            { customerName: { contains: filter.search, mode: "insensitive" as const } },
-            {
-              supplier: {
-                name: { contains: filter.search, mode: "insensitive" as const }
-              }
-            }
-          ]
-        : undefined
-    };
-
-    const orderBy = {
-      [sort?.field ?? ProcurementSortField.PUBLISHED_AT]: sort?.direction ?? "desc"
-    };
-
-    const [total, items] = await this.prisma.$transaction([
-      this.prisma.procurement.count({ where }),
-      this.prisma.procurement.findMany({
-        where,
-        take: limit,
-        skip: offset,
-        orderBy,
-        include: {
-          source: true,
-          supplier: true
-        }
-      })
-    ]);
-
-    return {
-      total,
-      items: items.map((item) => this.toGraphql(item))
-    };
-  }
-
-  async findById(id: string): Promise<ProcurementItem | null> {
-    const item = await this.prisma.procurement.findFirst({
-      where: { id, deletedAt: null },
-      include: { source: true, supplier: true }
-    });
-
-    return item ? this.toGraphql(item) : null;
-  }
-
-  async ingest(
-    input: IngestNormalizedItemInput,
-    request?: RequestLike
-  ): Promise<IngestResult> {
+  async ingest(input: IngestAuctionItemInput, request?: RequestLike): Promise<IngestResult> {
     const contentHash = createHash("sha256")
       .update(
         JSON.stringify({
@@ -106,35 +40,25 @@ export class ProcurementService {
       .digest("hex");
 
     const existing = await this.prisma.normalizedItem.findUnique({
-      where: { idempotencyKey },
-      include: {
-        procurement: {
-          include: {
-            source: true,
-            supplier: true
-          }
-        }
-      }
+      where: { idempotencyKey }
     });
 
-    if (existing?.procurementId) {
+    if (existing?.auctionItemId) {
       return {
         accepted: true,
         idempotencyKey,
-        procurementId: existing.procurementId
+        procurementId: existing.auctionItemId
       };
     }
 
     const result = await this.prisma.$transaction(async (tx) => {
       const source = await tx.source.upsert({
         where: { code: input.source },
-        update: {
-          isActive: true
-        },
+        update: { isActive: true },
         create: {
           code: input.source,
           name: input.source,
-          kind: toSourceKind(input.source)
+          kind: SourceKind.GISTORGI
         }
       });
 
@@ -224,20 +148,7 @@ export class ProcurementService {
         }
       }
 
-      let supplierId: string | undefined;
-      if (input.supplier) {
-        const supplier = await tx.supplier.upsert({
-          where: { normalizedName: input.supplier.toLowerCase() },
-          update: { name: input.supplier },
-          create: {
-            name: input.supplier,
-            normalizedName: input.supplier.toLowerCase()
-          }
-        });
-        supplierId = supplier.id;
-      }
-
-      const procurement = await tx.procurement.upsert({
+      const auctionItem = await tx.auctionItem.upsert({
         where: {
           sourceId_externalId: {
             sourceId: source.id,
@@ -247,13 +158,17 @@ export class ProcurementService {
         update: {
           title: input.title,
           description: input.description,
-          customerName: input.customer,
-          supplierId,
-          amount: input.amount,
-          currency: input.currency ?? "RUB",
-          publishedAt: input.publishedAt,
-          deadlineAt: input.deadlineAt,
+          organizerName: input.organizerName,
+          organizerInn: input.organizerInn,
+          auctionType: input.auctionType,
           status: input.status ?? ProcurementStatus.ACTIVE,
+          publishedAt: input.publishedAt,
+          applicationDeadline: input.applicationDeadline,
+          biddingDate: input.biddingDate,
+          startPrice: input.startPrice,
+          currency: input.currency,
+          region: input.region,
+          lotInfo: input.lotInfo,
           sourceUrl: input.sourceUrl,
           rawPayload: toNullableJson(input.rawPayload)
         },
@@ -262,13 +177,17 @@ export class ProcurementService {
           externalId: input.externalId,
           title: input.title,
           description: input.description,
-          customerName: input.customer,
-          supplierId,
-          amount: input.amount,
-          currency: input.currency ?? "RUB",
-          publishedAt: input.publishedAt,
-          deadlineAt: input.deadlineAt,
+          organizerName: input.organizerName,
+          organizerInn: input.organizerInn,
+          auctionType: input.auctionType,
           status: input.status ?? ProcurementStatus.ACTIVE,
+          publishedAt: input.publishedAt,
+          applicationDeadline: input.applicationDeadline,
+          biddingDate: input.biddingDate,
+          startPrice: input.startPrice,
+          currency: input.currency,
+          region: input.region,
+          lotInfo: input.lotInfo,
           sourceUrl: input.sourceUrl,
           rawPayload: toNullableJson(input.rawPayload)
         }
@@ -278,7 +197,7 @@ export class ProcurementService {
         data: {
           sourceId: source.id,
           rawEventId,
-          procurementId: procurement.id,
+          auctionItemId: auctionItem.id,
           externalId: input.externalId,
           payloadVersion: input.payloadVersion,
           idempotencyKey,
@@ -288,12 +207,12 @@ export class ProcurementService {
         }
       });
 
-      return procurement.id;
+      return auctionItem.id;
     });
 
     await this.auditService.record(
-      AuditAction.PROCUREMENT_INGESTED,
-      "Procurement",
+      AuditAction.AUCTION_ITEM_INGESTED,
+      "AuctionItem",
       result,
       { source: input.source, externalId: input.externalId },
       extractRequestContext(request)
@@ -304,64 +223,5 @@ export class ProcurementService {
       idempotencyKey,
       procurementId: result
     };
-  }
-
-  private toGraphql(item: {
-    id: string;
-    externalId: string;
-    title: string;
-    description: string | null;
-    customerName: string | null;
-    amount: number | null;
-    currency: string | null;
-    publishedAt: Date | null;
-    deadlineAt: Date | null;
-    status: ProcurementStatus;
-    sourceUrl: string | null;
-    createdAt: Date;
-    updatedAt: Date;
-    rawPayload: unknown;
-    source: { code: string };
-    supplier: { name: string } | null;
-  }): ProcurementItem {
-    return {
-      id: item.id,
-      externalId: item.externalId,
-      source: item.source.code,
-      title: item.title,
-      description: item.description ?? undefined,
-      customer: item.customerName ?? undefined,
-      supplier: item.supplier?.name ?? undefined,
-      amount: item.amount,
-      currency: item.currency ?? undefined,
-      status: item.status,
-      publishedAt: item.publishedAt,
-      deadlineAt: item.deadlineAt,
-      sourceUrl: item.sourceUrl ?? undefined,
-      createdAt: item.createdAt,
-      updatedAt: item.updatedAt,
-      rawPayload: (item.rawPayload ?? undefined) as Record<string, unknown> | undefined
-    };
-  }
-}
-
-function toSourceKind(source: string): SourceKind {
-  switch (source) {
-    case "find-tender":
-      return SourceKind.FIND_TENDER;
-    case "easuz":
-      return SourceKind.EASUZ;
-    case "eis":
-      return SourceKind.EIS;
-    case "rnp":
-      return SourceKind.RNP;
-    case "fedresurs":
-      return SourceKind.FEDRESURS;
-    case "fns":
-      return SourceKind.FNS;
-    case "gistorgi":
-      return SourceKind.GISTORGI;
-    default:
-      return SourceKind.DEMO;
   }
 }

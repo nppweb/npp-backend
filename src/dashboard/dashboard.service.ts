@@ -12,6 +12,10 @@ export class DashboardService {
     const timelineStart = new Date(Date.now() - (timelineWindowDays - 1) * 24 * 60 * 60 * 1000);
 
     const [
+      totalAuctions,
+      totalRegistryEntries,
+      totalSupplierRiskSignals,
+      totalSupplierCompanyProfiles,
       totalProcurements,
       activeSources,
       runsLast24h,
@@ -22,6 +26,10 @@ export class DashboardService {
       recentProcurements,
       recentSourceRuns
     ] = await Promise.all([
+      this.prisma.auctionItem.count(),
+      this.prisma.registryRecord.count(),
+      this.prisma.supplierRiskSignal.count(),
+      this.prisma.supplierCompanyProfile.count(),
       this.prisma.procurement.count({ where: { deletedAt: null } }),
       this.prisma.source.count({ where: { deletedAt: null, isActive: true } }),
       this.prisma.sourceRun.count({ where: { startedAt: { gte: last24Hours } } }),
@@ -48,6 +56,10 @@ export class DashboardService {
               procurements: {
                 where: { deletedAt: null }
               },
+              auctions: true,
+              registryEntries: true,
+              supplierRiskSignals: true,
+              supplierCompanyProfiles: true,
               runs: true
             }
           }
@@ -82,25 +94,43 @@ export class DashboardService {
     ]);
 
     const sourcesSummary = sources
-      .map((item) => ({
+      .map((item) => {
+        const recordCount =
+          item._count.procurements +
+          item._count.auctions +
+          item._count.registryEntries +
+          item._count.supplierRiskSignals +
+          item._count.supplierCompanyProfiles;
+
+        return {
         source: item.code,
         name: item.name,
         kind: item.kind,
         isActive: item.isActive,
         procurementCount: item._count.procurements,
+        recordCount,
         runCount: item._count.runs,
         lastRunAt: item.runs[0]?.startedAt ?? null
-      }))
-      .sort((left, right) => right.procurementCount - left.procurementCount);
+        };
+      })
+      .sort((left, right) => right.recordCount - left.recordCount);
+
+    const totalRecords =
+      totalProcurements +
+      totalAuctions +
+      totalRegistryEntries +
+      totalSupplierRiskSignals +
+      totalSupplierCompanyProfiles;
 
     return {
+      totalRecords,
       totalProcurements,
       activeSources,
       runsLast24h,
       lastPublishedAt: latest?.publishedAt ?? null,
       bySource: sourcesSummary.map((item) => ({
         source: item.source,
-        count: item.procurementCount
+        count: item.recordCount
       })),
       procurementsByStatus: this.toStatusStats(statusCounts),
       procurementsOverTime: this.buildTimeline(timelineRows, timelineStart, timelineWindowDays),

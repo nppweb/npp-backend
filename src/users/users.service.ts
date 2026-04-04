@@ -20,11 +20,7 @@ export class UsersService {
   ) {}
 
   async me(userId: string) {
-    const user = await this.prisma.user.findUnique({ where: { id: userId } });
-    if (!user || user.deletedAt) {
-      throw new NotFoundException("User not found");
-    }
-    return user;
+    return this.requireActiveUser(userId);
   }
 
   listUsers() {
@@ -71,10 +67,7 @@ export class UsersService {
       "User",
       user.id,
       { actorId: actor.id, role: user.role },
-      {
-        ...extractRequestContext(request),
-        userId: actor.id
-      }
+      this.buildAuditContext(actor, request)
     );
 
     return user;
@@ -86,10 +79,7 @@ export class UsersService {
     actor: AuthenticatedUser,
     request?: RequestLike
   ) {
-    const user = await this.prisma.user.findUnique({ where: { id: userId } });
-    if (!user || user.deletedAt) {
-      throw new NotFoundException("User not found");
-    }
+    await this.requireActiveUser(userId);
 
     const updated = await this.prisma.user.update({
       where: { id: userId },
@@ -101,10 +91,7 @@ export class UsersService {
       "User",
       updated.id,
       { actorId: actor.id, role },
-      {
-        ...extractRequestContext(request),
-        userId: actor.id
-      }
+      this.buildAuditContext(actor, request)
     );
 
     return updated;
@@ -114,6 +101,8 @@ export class UsersService {
     if (userId === actor.id) {
       throw new ConflictException("You cannot deactivate your own account");
     }
+
+    await this.requireActiveUser(userId);
 
     const user = await this.prisma.user.update({
       where: { id: userId },
@@ -128,12 +117,25 @@ export class UsersService {
       "User",
       user.id,
       { actorId: actor.id, deactivated: true },
-      {
-        ...extractRequestContext(request),
-        userId: actor.id
-      }
+      this.buildAuditContext(actor, request)
     );
 
     return true;
+  }
+
+  private async requireActiveUser(userId: string) {
+    const user = await this.prisma.user.findUnique({ where: { id: userId } });
+    if (!user || user.deletedAt) {
+      throw new NotFoundException("User not found");
+    }
+
+    return user;
+  }
+
+  private buildAuditContext(actor: AuthenticatedUser, request?: RequestLike) {
+    return {
+      ...extractRequestContext(request),
+      userId: actor.id
+    };
   }
 }

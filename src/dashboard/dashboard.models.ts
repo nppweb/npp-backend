@@ -48,6 +48,9 @@ export class DashboardSourceSummaryItem {
   procurementCount!: number;
 
   @Field(() => Int)
+  recordCount!: number;
+
+  @Field(() => Int)
   runCount!: number;
 
   @Field(() => Date, { nullable: true })
@@ -56,6 +59,9 @@ export class DashboardSourceSummaryItem {
 
 @ObjectType()
 export class DashboardSummary {
+  @Field(() => Int)
+  totalRecords!: number;
+
   @Field(() => Int)
   totalProcurements!: number;
 

@@ -9,6 +9,8 @@ import { join } from "node:path";
 import GraphQLJSON from "graphql-type-json";
 import { LoggerModule } from "nestjs-pino";
 import { randomUUID } from "node:crypto";
+import { AuctionResolver } from "./auction/auction.resolver";
+import { AuctionService } from "./auction/auction.service";
 import { AuthResolver } from "./auth/auth.resolver";
 import { AuthService } from "./auth/auth.service";
 import { envSchema, validateEnv } from "./config/env";
@@ -27,6 +29,12 @@ import { ReportsService } from "./reports/reports.service";
 import { SourcesResolver } from "./sources/sources.resolver";
 import { SourcesService } from "./sources/sources.service";
 import { AuditService } from "./audit/audit.service";
+import { RegistryResolver } from "./registry/registry.resolver";
+import { RegistryService } from "./registry/registry.service";
+import { SupplierCompanyResolver } from "./supplier-company/supplier-company.resolver";
+import { SupplierCompanyService } from "./supplier-company/supplier-company.service";
+import { SupplierRiskResolver } from "./supplier-risk/supplier-risk.resolver";
+import { SupplierRiskService } from "./supplier-risk/supplier-risk.service";
 import { UsersResolver } from "./users/users.resolver";
 import { UsersService } from "./users/users.service";
 
@@ -86,6 +94,8 @@ import { UsersService } from "./users/users.service";
     { provide: APP_GUARD, useClass: GqlThrottlerGuard },
     { provide: APP_GUARD, useClass: GqlAuthGuard },
     { provide: APP_FILTER, useClass: HttpExceptionLoggingFilter },
+    AuctionResolver,
+    AuctionService,
     AuditService,
     AuthResolver,
     AuthService,
@@ -93,6 +103,12 @@ import { UsersService } from "./users/users.service";
     DashboardService,
     ProcurementResolver,
     ProcurementService,
+    RegistryResolver,
+    RegistryService,
+    SupplierCompanyResolver,
+    SupplierCompanyService,
+    SupplierRiskResolver,
+    SupplierRiskService,
     ReportsResolver,
     ReportsService,
     SourcesResolver,

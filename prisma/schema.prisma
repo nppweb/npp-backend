@@ -16,6 +16,12 @@ enum UserRole {
 enum SourceKind {
   DEMO
   FIND_TENDER
+  EASUZ
+  EIS
+  RNP
+  FEDRESURS
+  FNS
+  GISTORGI
 }
 
 enum SourceRunStatus {
@@ -60,6 +66,10 @@ enum AuditAction {
   USER_ROLE_UPDATED
   USER_PASSWORD_CHANGED
   PROCUREMENT_INGESTED
+  REGISTRY_RECORD_INGESTED
+  SUPPLIER_RISK_SIGNAL_INGESTED
+  SUPPLIER_COMPANY_PROFILE_INGESTED
+  AUCTION_ITEM_INGESTED
 }
 
 model User {
@@ -113,8 +123,41 @@ model Source {
   rawEvents       RawEvent[]
   normalizedItems NormalizedItem[]
   procurements    Procurement[]
+  auctions        AuctionItem[]
+  registryEntries RegistryRecord[]
+  supplierRiskSignals SupplierRiskSignal[]
+  supplierCompanyProfiles SupplierCompanyProfile[]
 
   @@index([kind, isActive])
+}
+
+model RegistryRecord {
+  id             String           @id @default(uuid())
+  sourceId       String
+  externalId     String
+  supplierName   String
+  supplierInn    String?
+  supplierOgrn   String?
+  registryStatus String?
+  reason         String?
+  decisionDate   DateTime?
+  inclusionDate  DateTime?
+  exclusionDate  DateTime?
+  customerName   String?
+  legalBasis     String?
+  region         String?
+  sourceUrl      String?
+  rawPayload     Json?
+  deletedAt      DateTime?
+  createdAt      DateTime         @default(now())
+  updatedAt      DateTime         @updatedAt
+  source         Source           @relation(fields: [sourceId], references: [id], onDelete: Cascade)
+  normalizedItems NormalizedItem[]
+
+  @@unique([sourceId, externalId])
+  @@index([supplierInn])
+  @@index([supplierOgrn])
+  @@index([inclusionDate(sort: Desc)])
 }
 
 model SourceRun {
@@ -171,13 +214,111 @@ model Supplier {
   name           String
   normalizedName String        @unique
   taxId          String?       @unique
+  ogrn           String?       @unique
   metadata       Json?
   deletedAt      DateTime?
   createdAt      DateTime      @default(now())
   updatedAt      DateTime      @updatedAt
   procurements   Procurement[]
+  riskSignals    SupplierRiskSignal[]
+  companyProfiles SupplierCompanyProfile[]
 
   @@index([name])
+}
+
+model SupplierRiskSignal {
+  id                String             @id @default(uuid())
+  sourceId          String
+  supplierId        String?
+  externalId        String
+  messageType       String?
+  supplierName      String
+  supplierInn       String?
+  supplierOgrn      String?
+  title             String
+  description       String?
+  publishedAt       DateTime?
+  eventDate         DateTime?
+  bankruptcyStage   String?
+  caseNumber        String?
+  courtName         String?
+  riskLevel         String?
+  sourceUrl         String?
+  rawPayload        Json?
+  deletedAt         DateTime?
+  createdAt         DateTime           @default(now())
+  updatedAt         DateTime           @updatedAt
+  source            Source             @relation(fields: [sourceId], references: [id], onDelete: Cascade)
+  supplier          Supplier?          @relation(fields: [supplierId], references: [id], onDelete: SetNull)
+  normalizedItems   NormalizedItem[]
+
+  @@unique([sourceId, externalId])
+  @@index([supplierId])
+  @@index([supplierInn])
+  @@index([supplierOgrn])
+  @@index([publishedAt(sort: Desc)])
+}
+
+model SupplierCompanyProfile {
+  id                String             @id @default(uuid())
+  sourceId          String
+  supplierId        String?
+  externalId        String
+  companyName       String
+  shortName         String?
+  inn               String?
+  kpp               String?
+  ogrn              String?
+  companyStatus     String?
+  registrationDate  DateTime?
+  address           String?
+  okved             String?
+  liquidationMark   Boolean?
+  region            String?
+  sourceUrl         String?
+  rawPayload        Json?
+  deletedAt         DateTime?
+  createdAt         DateTime           @default(now())
+  updatedAt         DateTime           @updatedAt
+  source            Source             @relation(fields: [sourceId], references: [id], onDelete: Cascade)
+  supplier          Supplier?          @relation(fields: [supplierId], references: [id], onDelete: SetNull)
+  normalizedItems   NormalizedItem[]
+
+  @@unique([sourceId, externalId])
+  @@index([supplierId])
+  @@index([inn])
+  @@index([ogrn])
+  @@index([registrationDate(sort: Desc)])
+}
+
+model AuctionItem {
+  id                  String             @id @default(uuid())
+  sourceId            String
+  externalId          String
+  title               String
+  description         String?
+  organizerName       String?
+  organizerInn        String?
+  auctionType         String?
+  status              ProcurementStatus  @default(ACTIVE)
+  publishedAt         DateTime?
+  applicationDeadline DateTime?
+  biddingDate         DateTime?
+  startPrice          Float?
+  currency            String?
+  region              String?
+  lotInfo             String?
+  sourceUrl           String?
+  rawPayload          Json?
+  deletedAt           DateTime?
+  createdAt           DateTime           @default(now())
+  updatedAt           DateTime           @updatedAt
+  source              Source             @relation(fields: [sourceId], references: [id], onDelete: Cascade)
+  normalizedItems     NormalizedItem[]
+
+  @@unique([sourceId, externalId])
+  @@index([sourceId, status])
+  @@index([publishedAt(sort: Desc)])
 }
 
 model Procurement {
@@ -212,6 +353,10 @@ model NormalizedItem {
   sourceId        String
   rawEventId      String?
   procurementId   String?
+  registryEntryId String?
+  supplierRiskSignalId String?
+  supplierCompanyProfileId String?
+  auctionItemId   String?
   externalId      String
   payloadVersion  String
   idempotencyKey  String      @unique
@@ -223,9 +368,17 @@ model NormalizedItem {
   source          Source      @relation(fields: [sourceId], references: [id], onDelete: Cascade)
   rawEvent        RawEvent?   @relation(fields: [rawEventId], references: [id], onDelete: SetNull)
   procurement     Procurement? @relation(fields: [procurementId], references: [id], onDelete: SetNull)
+  registryEntry   RegistryRecord? @relation(fields: [registryEntryId], references: [id], onDelete: SetNull)
+  supplierRiskSignal SupplierRiskSignal? @relation(fields: [supplierRiskSignalId], references: [id], onDelete: SetNull)
+  supplierCompanyProfile SupplierCompanyProfile? @relation(fields: [supplierCompanyProfileId], references: [id], onDelete: SetNull)
+  auctionItem     AuctionItem? @relation(fields: [auctionItemId], references: [id], onDelete: SetNull)
 
   @@unique([sourceId, externalId, payloadVersion, contentHash])
   @@index([procurementId])
+  @@index([registryEntryId])
+  @@index([supplierRiskSignalId])
+  @@index([supplierCompanyProfileId])
+  @@index([auctionItemId])
 }
 
 model Artifact {

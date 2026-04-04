@@ -4,6 +4,18 @@ import { DashboardService } from "./dashboard.service";
 describe("DashboardService", () => {
   it("aggregates dashboard cards, charts and recent activity", async () => {
     const prisma = {
+      auctionItem: {
+        count: vi.fn().mockResolvedValue(3)
+      },
+      registryRecord: {
+        count: vi.fn().mockResolvedValue(5)
+      },
+      supplierRiskSignal: {
+        count: vi.fn().mockResolvedValue(2)
+      },
+      supplierCompanyProfile: {
+        count: vi.fn().mockResolvedValue(7)
+      },
       procurement: {
         count: vi.fn().mockResolvedValue(24),
         findFirst: vi.fn().mockResolvedValue({ publishedAt: new Date("2026-03-30T09:15:00.000Z") }),
@@ -48,7 +60,14 @@ describe("DashboardService", () => {
             kind: "DEMO",
             isActive: true,
             runs: [{ startedAt: new Date("2026-03-29T06:00:00.000Z") }],
-            _count: { procurements: 4, runs: 2 }
+            _count: {
+              procurements: 4,
+              auctions: 0,
+              registryEntries: 0,
+              supplierRiskSignals: 0,
+              supplierCompanyProfiles: 0,
+              runs: 2
+            }
           },
           {
             code: "find-tender",
@@ -56,7 +75,14 @@ describe("DashboardService", () => {
             kind: "FIND_TENDER",
             isActive: true,
             runs: [{ startedAt: new Date("2026-03-30T09:00:00.000Z") }],
-            _count: { procurements: 11, runs: 5 }
+            _count: {
+              procurements: 11,
+              auctions: 3,
+              registryEntries: 5,
+              supplierRiskSignals: 2,
+              supplierCompanyProfiles: 7,
+              runs: 5
+            }
           }
         ])
       },
@@ -84,12 +110,13 @@ describe("DashboardService", () => {
     const summary = await service.summary();
 
     expect(summary).toMatchObject({
+      totalRecords: 41,
       totalProcurements: 24,
       activeSources: 3,
       runsLast24h: 9,
       lastPublishedAt: new Date("2026-03-30T09:15:00.000Z"),
       bySource: [
-        { source: "find-tender", count: 11 },
+        { source: "find-tender", count: 28 },
         { source: "demo", count: 4 }
       ],
       procurementsByStatus: [
@@ -107,11 +134,13 @@ describe("DashboardService", () => {
         expect.objectContaining({
           source: "find-tender",
           procurementCount: 11,
+          recordCount: 28,
           runCount: 5
         }),
         expect.objectContaining({
           source: "demo",
           procurementCount: 4,
+          recordCount: 4,
           runCount: 2
         })
       ],
@@ -148,6 +177,10 @@ describe("DashboardService", () => {
             procurements: {
               where: { deletedAt: null }
             },
+            auctions: true,
+            registryEntries: true,
+            supplierRiskSignals: true,
+            supplierCompanyProfiles: true,
             runs: true
           }
         }
