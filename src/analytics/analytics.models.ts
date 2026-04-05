@@ -27,6 +27,57 @@ export class AnalyticsSupplierExposureItem {
 }
 
 @ObjectType()
+export class AnalyticsNppTimelineItem {
+  @Field()
+  label!: string;
+
+  @Field(() => Int)
+  procurementCount!: number;
+
+  @Field(() => Float)
+  totalAmount!: number;
+}
+
+@ObjectType()
+export class AnalyticsNppStationItem {
+  @Field()
+  station!: string;
+
+  @Field(() => Int)
+  procurementCount!: number;
+
+  @Field(() => Float)
+  totalAmount!: number;
+}
+
+@ObjectType()
+export class AnalyticsNppSourceItem {
+  @Field()
+  source!: string;
+
+  @Field()
+  name!: string;
+
+  @Field(() => Int)
+  procurementCount!: number;
+
+  @Field(() => Float)
+  totalAmount!: number;
+}
+
+@ObjectType()
+export class AnalyticsNppCustomerItem {
+  @Field()
+  customer!: string;
+
+  @Field(() => Int)
+  procurementCount!: number;
+
+  @Field(() => Float)
+  totalAmount!: number;
+}
+
+@ObjectType()
 export class AnalyticsSourceHealthItem {
   @Field()
   source!: string;
@@ -64,6 +115,21 @@ export class AnalyticsSourceHealthItem {
 
 @ObjectType()
 export class AnalyticsSummary {
+  @Field(() => Date)
+  nppPeriodStart!: Date;
+
+  @Field(() => Int)
+  nppProcurementCount!: number;
+
+  @Field(() => Int)
+  nppContractCount!: number;
+
+  @Field(() => Int)
+  nppStationsCovered!: number;
+
+  @Field(() => Float)
+  nppTotalAmount!: number;
+
   @Field(() => Int)
   closingSoonCount!: number;
 
@@ -96,6 +162,21 @@ export class AnalyticsSummary {
 
   @Field(() => [AnalyticsSupplierExposureItem])
   supplierExposure!: AnalyticsSupplierExposureItem[];
+
+  @Field(() => [AnalyticsNppTimelineItem])
+  nppMonthlyDynamics!: AnalyticsNppTimelineItem[];
+
+  @Field(() => [AnalyticsNppStationItem])
+  nppStationCoverage!: AnalyticsNppStationItem[];
+
+  @Field(() => [AnalyticsNppSourceItem])
+  nppSourceCoverage!: AnalyticsNppSourceItem[];
+
+  @Field(() => [AnalyticsNppCustomerItem])
+  nppCustomerCoverage!: AnalyticsNppCustomerItem[];
+
+  @Field(() => [ProcurementItem])
+  nppRecentProcurements!: ProcurementItem[];
 
   @Field(() => [ProcurementItem])
   attentionProcurements!: ProcurementItem[];

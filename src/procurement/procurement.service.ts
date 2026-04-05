@@ -269,7 +269,8 @@ export class ProcurementService {
           deadlineAt: input.deadlineAt,
           status: input.status ?? ProcurementStatus.ACTIVE,
           sourceUrl: input.sourceUrl,
-          rawPayload: toNullableJson(input.rawPayload)
+          rawPayload: toNullableJson(input.rawPayload),
+          deletedAt: null
         },
         create: {
           sourceId: source.id,
@@ -364,6 +365,8 @@ function toSourceKind(source: string): SourceKind {
     case "easuz":
       return SourceKind.EASUZ;
     case "eis":
+    case "eis_contracts":
+    case "eis_contracts_223":
       return SourceKind.EIS;
     case "rnp":
       return SourceKind.RNP;

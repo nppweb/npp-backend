@@ -4,6 +4,50 @@ import { PrismaService } from "../prisma/prisma.service";
 
 const HIGH_VALUE_THRESHOLD = 1_000_000;
 const DAY_MS = 24 * 60 * 60 * 1000;
+const NPP_PERIOD_START = new Date("2025-01-01T00:00:00+03:00");
+const NPP_SOURCE_CODES = ["eis", "eis_contracts", "eis_contracts_223"] as const;
+const NPP_STATION_MATCHERS = [
+  {
+    canonical: "Балаковская атомная станция",
+    variants: ["балаковская атомная станция", "балаковская аэс", "балаковская аэс-авто"]
+  },
+  {
+    canonical: "Белоярская атомная станция",
+    variants: ["белоярская атомная станция", "белоярская аэс"]
+  },
+  {
+    canonical: "Билибинская атомная станция",
+    variants: ["билибинская атомная станция", "билибинская аэс"]
+  },
+  {
+    canonical: "Калининская атомная станция",
+    variants: ["калининская атомная станция", "калининская аэс", "калининская аэс-сервис"]
+  },
+  {
+    canonical: "Кольская атомная станция",
+    variants: ["кольская атомная станция", "кольская аэс"]
+  },
+  {
+    canonical: "Курская атомная станция",
+    variants: ["курская атомная станция", "курская аэс", "курская аэс-сервис"]
+  },
+  {
+    canonical: "Ленинградская атомная станция",
+    variants: ["ленинградская атомная станция", "ленинградская аэс", "ленинградская аэс-авто"]
+  },
+  {
+    canonical: "Нововоронежская атомная станция",
+    variants: ["нововоронежская атомная станция", "нововоронежская аэс"]
+  },
+  {
+    canonical: "Ростовская атомная станция",
+    variants: ["ростовская атомная станция", "ростовская аэс"]
+  },
+  {
+    canonical: "Смоленская атомная станция",
+    variants: ["смоленская атомная станция", "смоленская аэс", "смоленская аэс-сервис"]
+  }
+] as const;
 
 @Injectable()
 export class AnalyticsService {
@@ -27,7 +71,8 @@ export class AnalyticsService {
       recentRuns,
       sources,
       supplierProcurements,
-      attentionProcurements
+      attentionProcurements,
+      nppProcurements
     ] = await Promise.all([
       this.prisma.procurement.count({
         where: {
@@ -166,6 +211,22 @@ export class AnalyticsService {
           source: true,
           supplier: true
         }
+      }),
+      this.prisma.procurement.findMany({
+        where: {
+          deletedAt: null,
+          source: {
+            deletedAt: null,
+            code: {
+              in: [...NPP_SOURCE_CODES]
+            }
+          },
+          OR: [{ publishedAt: { gte: NPP_PERIOD_START } }, { createdAt: { gte: NPP_PERIOD_START } }]
+        },
+        include: {
+          source: true,
+          supplier: true
+        }
       })
     ]);
 
@@ -282,7 +343,118 @@ export class AnalyticsService {
       }
     ];
 
+    const nppMonthlyStats = new Map<string, { label: string; procurementCount: number; totalAmount: number }>();
+    const nppStationStats = new Map<string, { procurementCount: number; totalAmount: number }>();
+    const nppSourceStats = new Map<string, { name: string; procurementCount: number; totalAmount: number }>();
+    const nppCustomerStats = new Map<string, { procurementCount: number; totalAmount: number }>();
+    let nppTotalAmount = 0;
+    let nppContractCount = 0;
+
+    for (const item of nppProcurements) {
+      const stationName = resolveTargetStationName(item.rawPayload, item.title, item.customerName);
+      const amount = item.amount ?? 0;
+      const effectiveDate = item.publishedAt ?? item.createdAt;
+      const sourceType = resolveSourceType(item.rawPayload);
+
+      nppTotalAmount += amount;
+
+      if (sourceType === "contract") {
+        nppContractCount += 1;
+      }
+
+      if (stationName) {
+        const current = nppStationStats.get(stationName) ?? {
+          procurementCount: 0,
+          totalAmount: 0
+        };
+        current.procurementCount += 1;
+        current.totalAmount += amount;
+        nppStationStats.set(stationName, current);
+      }
+
+      const sourceCurrent = nppSourceStats.get(item.source.code) ?? {
+        name: item.source.name,
+        procurementCount: 0,
+        totalAmount: 0
+      };
+      sourceCurrent.procurementCount += 1;
+      sourceCurrent.totalAmount += amount;
+      nppSourceStats.set(item.source.code, sourceCurrent);
+
+      if (item.customerName) {
+        const customerCurrent = nppCustomerStats.get(item.customerName) ?? {
+          procurementCount: 0,
+          totalAmount: 0
+        };
+        customerCurrent.procurementCount += 1;
+        customerCurrent.totalAmount += amount;
+        nppCustomerStats.set(item.customerName, customerCurrent);
+      }
+
+      const timelineKey = `${effectiveDate.getFullYear()}-${String(effectiveDate.getMonth() + 1).padStart(2, "0")}`;
+      const timelineLabel = effectiveDate.toLocaleDateString("ru-RU", {
+        month: "short",
+        year: "numeric"
+      });
+      const timelineCurrent = nppMonthlyStats.get(timelineKey) ?? {
+        label: timelineLabel,
+        procurementCount: 0,
+        totalAmount: 0
+      };
+      timelineCurrent.procurementCount += 1;
+      timelineCurrent.totalAmount += amount;
+      nppMonthlyStats.set(timelineKey, timelineCurrent);
+    }
+
+    const nppMonthlyDynamics = buildMonthRange(NPP_PERIOD_START, now).map((monthKey) => {
+      const existing = nppMonthlyStats.get(monthKey.key);
+      return {
+        label: existing?.label ?? monthKey.label,
+        procurementCount: existing?.procurementCount ?? 0,
+        totalAmount: roundMetric(existing?.totalAmount ?? 0)
+      };
+    });
+
+    const nppStationCoverage = Array.from(nppStationStats.entries())
+      .map(([station, stats]) => ({
+        station,
+        procurementCount: stats.procurementCount,
+        totalAmount: roundMetric(stats.totalAmount)
+      }))
+      .sort((left, right) => right.procurementCount - left.procurementCount || left.station.localeCompare(right.station));
+
+    const nppSourceCoverage = Array.from(nppSourceStats.entries())
+      .map(([source, stats]) => ({
+        source,
+        name: stats.name,
+        procurementCount: stats.procurementCount,
+        totalAmount: roundMetric(stats.totalAmount)
+      }))
+      .sort((left, right) => right.procurementCount - left.procurementCount || left.source.localeCompare(right.source));
+
+    const nppCustomerCoverage = Array.from(nppCustomerStats.entries())
+      .map(([customer, stats]) => ({
+        customer,
+        procurementCount: stats.procurementCount,
+        totalAmount: roundMetric(stats.totalAmount)
+      }))
+      .sort((left, right) => right.procurementCount - left.procurementCount || left.customer.localeCompare(right.customer))
+      .slice(0, 8);
+
+    const nppRecentProcurements = [...nppProcurements]
+      .sort(
+        (left, right) =>
+          (right.publishedAt ?? right.createdAt).getTime() - (left.publishedAt ?? left.createdAt).getTime()
+      )
+      .slice(0, 8)
+      .map((item) => toProcurementGraphql(item));
+
     return {
+      nppPeriodStart: NPP_PERIOD_START,
+      nppProcurementCount: nppProcurements.length,
+      nppContractCount,
+      nppStationsCovered: nppStationCoverage.length,
+      nppTotalAmount: roundMetric(nppTotalAmount),
       closingSoonCount,
       overdueCount,
       highValueCount,
@@ -301,26 +473,109 @@ export class AnalyticsService {
         );
       }),
       supplierExposure,
-      attentionProcurements: attentionProcurements.map((item) => ({
-        id: item.id,
-        externalId: item.externalId,
-        source: item.source.code,
-        title: item.title,
-        description: item.description ?? undefined,
-        customer: item.customerName ?? undefined,
-        supplier: item.supplier?.name ?? undefined,
-        amount: item.amount,
-        currency: item.currency ?? undefined,
-        status: item.status,
-        publishedAt: item.publishedAt,
-        deadlineAt: item.deadlineAt,
-        sourceUrl: item.sourceUrl ?? undefined,
-        createdAt: item.createdAt,
-        updatedAt: item.updatedAt,
-        rawPayload: (item.rawPayload ?? undefined) as Record<string, unknown> | undefined
-      }))
+      nppMonthlyDynamics,
+      nppStationCoverage,
+      nppSourceCoverage,
+      nppCustomerCoverage,
+      nppRecentProcurements,
+      attentionProcurements: attentionProcurements.map((item) => toProcurementGraphql(item))
     };
   }
+}
+
+function buildMonthRange(start: Date, end: Date): Array<{ key: string; label: string }> {
+  const cursor = new Date(Date.UTC(start.getUTCFullYear(), start.getUTCMonth(), 1));
+  const limit = new Date(Date.UTC(end.getUTCFullYear(), end.getUTCMonth(), 1));
+  const months: Array<{ key: string; label: string }> = [];
+
+  while (cursor <= limit) {
+    months.push({
+      key: `${cursor.getUTCFullYear()}-${String(cursor.getUTCMonth() + 1).padStart(2, "0")}`,
+      label: cursor.toLocaleDateString("ru-RU", {
+        month: "short",
+        year: "numeric",
+        timeZone: "UTC"
+      })
+    });
+    cursor.setUTCMonth(cursor.getUTCMonth() + 1);
+  }
+
+  return months;
+}
+
+function resolveSourceType(rawPayload: unknown): string | undefined {
+  const sourceSpecificData = getSourceSpecificData(rawPayload);
+  return typeof sourceSpecificData?.sourceType === "string" ? sourceSpecificData.sourceType : undefined;
+}
+
+function resolveTargetStationName(
+  rawPayload: unknown,
+  title: string,
+  customerName: string | null
+): string | undefined {
+  const sourceSpecificData = getSourceSpecificData(rawPayload);
+  const explicitStationName =
+    typeof sourceSpecificData?.targetStationName === "string" ? sourceSpecificData.targetStationName : undefined;
+
+  if (explicitStationName) {
+    return explicitStationName;
+  }
+
+  const haystack = [title, customerName ?? ""].join(" ").toLowerCase();
+  return NPP_STATION_MATCHERS.find((station) =>
+    station.variants.some((variant) => haystack.includes(variant))
+  )?.canonical;
+}
+
+function getSourceSpecificData(rawPayload: unknown): Record<string, unknown> | undefined {
+  if (!rawPayload || typeof rawPayload !== "object" || Array.isArray(rawPayload)) {
+    return undefined;
+  }
+
+  const candidate = (rawPayload as Record<string, unknown>).sourceSpecificData;
+  if (!candidate || typeof candidate !== "object" || Array.isArray(candidate)) {
+    return undefined;
+  }
+
+  return candidate as Record<string, unknown>;
+}
+
+function toProcurementGraphql(item: {
+  id: string;
+  externalId: string;
+  title: string;
+  description: string | null;
+  customerName: string | null;
+  amount: number | null;
+  currency: string | null;
+  publishedAt: Date | null;
+  deadlineAt: Date | null;
+  status: ProcurementStatus;
+  sourceUrl: string | null;
+  createdAt: Date;
+  updatedAt: Date;
+  rawPayload: unknown;
+  source: { code: string };
+  supplier: { name: string } | null;
+}) {
+  return {
+    id: item.id,
+    externalId: item.externalId,
+    source: item.source.code,
+    title: item.title,
+    description: item.description ?? undefined,
+    customer: item.customerName ?? undefined,
+    supplier: item.supplier?.name ?? undefined,
+    amount: item.amount,
+    currency: item.currency ?? undefined,
+    status: item.status,
+    publishedAt: item.publishedAt,
+    deadlineAt: item.deadlineAt,
+    sourceUrl: item.sourceUrl ?? undefined,
+    createdAt: item.createdAt,
+    updatedAt: item.updatedAt,
+    rawPayload: (item.rawPayload ?? undefined) as Record<string, unknown> | undefined
+  };
 }
 
 function roundMetric(value: number) {

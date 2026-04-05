@@ -26,6 +26,20 @@ export const SOURCE_CATALOG: SourceCatalogItem[] = [
     baseUrl: "https://zakupki.gov.ru"
   },
   {
+    code: "eis_contracts",
+    name: "ЕИС / реестр контрактов 44-ФЗ",
+    description: "Федеральный реестр исполненных и действующих контрактов 44-ФЗ.",
+    kind: SourceKind.EIS,
+    baseUrl: "https://zakupki.gov.ru"
+  },
+  {
+    code: "eis_contracts_223",
+    name: "ЕИС / реестр договоров 223-ФЗ",
+    description: "Федеральный реестр договоров, заключенных по закупкам 223-ФЗ.",
+    kind: SourceKind.EIS,
+    baseUrl: "https://zakupki.gov.ru"
+  },
+  {
     code: "rnp",
     name: "Реестр недобросовестных поставщиков",
     description: "Реестр недобросовестных поставщиков на базе zakupki.gov.ru.",
