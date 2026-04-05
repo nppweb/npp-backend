@@ -40,6 +40,12 @@ export class ProcurementService {
     const where = {
       deletedAt: null,
       source: filter?.source ? { code: filter.source, deletedAt: null } : { deletedAt: null },
+      rawPayload: filter?.nppFocus
+        ? {
+            path: ["sourceSpecificData", "targetStationName"],
+            equals: filter.nppFocus
+          }
+        : undefined,
       status: filter?.status,
       OR: filter?.search
         ? [

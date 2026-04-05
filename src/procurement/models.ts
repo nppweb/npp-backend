@@ -87,6 +87,11 @@ export class ProcurementFilterInput {
   @IsString()
   source?: string;
 
+  @Field(() => String, { nullable: true })
+  @IsOptional()
+  @IsString()
+  nppFocus?: string;
+
   @Field(() => ProcurementStatus, { nullable: true })
   @IsOptional()
   @IsEnum(ProcurementStatus)
