@@ -4,6 +4,16 @@ import { SourceRunStatus } from "@prisma/client";
 import { PrismaService } from "../prisma/prisma.service";
 import { syncEnabledSourcesCatalog } from "./source-catalog";
 
+type UpsertSourceRunInput = {
+  sourceCode: string;
+  runKey: string;
+  status: SourceRunStatus;
+  startedAt: Date;
+  finishedAt?: Date | null;
+  errorMessage?: string | null;
+  itemsDiscovered?: number;
+};
+
 @Injectable()
 export class SourcesService {
   constructor(
@@ -105,31 +115,12 @@ export class SourcesService {
           const startedAt = item.startedAt ? new Date(item.startedAt) : null;
 
           if (item.accepted && item.runKey && startedAt) {
-            const source = await this.prisma.source.findFirst({
-              where: {
-                code: item.sourceCode,
-                deletedAt: null
-              },
-              select: { id: true }
+            await this.upsertSourceRun({
+              sourceCode: item.sourceCode,
+              runKey: item.runKey,
+              status: SourceRunStatus.RUNNING,
+              startedAt
             });
-
-            if (source) {
-              await this.prisma.sourceRun.upsert({
-                where: { runKey: item.runKey },
-                update: {
-                  status: SourceRunStatus.RUNNING,
-                  startedAt,
-                  finishedAt: null,
-                  errorMessage: null
-                },
-                create: {
-                  sourceId: source.id,
-                  runKey: item.runKey,
-                  status: SourceRunStatus.RUNNING,
-                  startedAt
-                }
-              });
-            }
           }
 
           return {
@@ -139,5 +130,45 @@ export class SourcesService {
         })
       )
     };
+  }
+
+  async upsertSourceRun(input: UpsertSourceRunInput) {
+    await syncEnabledSourcesCatalog(
+      this.prisma,
+      this.configService.get<string[]>("ENABLED_SOURCES") ?? []
+    );
+
+    const source = await this.prisma.source.findFirst({
+      where: {
+        code: input.sourceCode,
+        deletedAt: null
+      },
+      select: { id: true }
+    });
+
+    if (!source) {
+      return null;
+    }
+
+    return this.prisma.sourceRun.upsert({
+      where: { runKey: input.runKey },
+      update: {
+        status: input.status,
+        startedAt: input.startedAt,
+        finishedAt: input.finishedAt ?? null,
+        errorMessage: input.errorMessage ?? null,
+        itemsDiscovered:
+          typeof input.itemsDiscovered === "number" ? input.itemsDiscovered : undefined
+      },
+      create: {
+        sourceId: source.id,
+        runKey: input.runKey,
+        status: input.status,
+        startedAt: input.startedAt,
+        finishedAt: input.finishedAt ?? null,
+        errorMessage: input.errorMessage ?? null,
+        itemsDiscovered: input.itemsDiscovered ?? 0
+      }
+    });
   }
 }

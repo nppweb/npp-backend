@@ -32,6 +32,7 @@ import { ScraperAdminController } from "./scraper-admin/scraper-admin.controller
 import { ScraperAdminResolver } from "./scraper-admin/scraper-admin.resolver";
 import { ScraperAdminService } from "./scraper-admin/scraper-admin.service";
 import { SourcesResolver } from "./sources/sources.resolver";
+import { SourcesController } from "./sources/sources.controller";
 import { SourcesService } from "./sources/sources.service";
 import { AuditService } from "./audit/audit.service";
 import { RegistryResolver } from "./registry/registry.resolver";
@@ -94,7 +95,7 @@ import { UsersService } from "./users/users.service";
       resolvers: { JSON: GraphQLJSON }
     })
   ],
-  controllers: [HealthController, MetricsController, ScraperAdminController],
+  controllers: [HealthController, MetricsController, ScraperAdminController, SourcesController],
   providers: [
     { provide: APP_GUARD, useClass: GqlThrottlerGuard },
     { provide: APP_GUARD, useClass: GqlAuthGuard },
