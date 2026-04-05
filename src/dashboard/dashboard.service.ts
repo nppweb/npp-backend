@@ -29,7 +29,8 @@ export class DashboardService {
       totalProcurements,
       activeSources,
       runsLast24h,
-      latest,
+      latestPublished,
+      latestUpdated,
       sources,
       statusCounts,
       timelineRows,
@@ -49,6 +50,11 @@ export class DashboardService {
         where: { deletedAt: null, source: { deletedAt: null } },
         orderBy: [{ publishedAt: "desc" }, { createdAt: "desc" }],
         select: { publishedAt: true }
+      }),
+      this.prisma.procurement.findFirst({
+        where: { deletedAt: null, source: { deletedAt: null } },
+        orderBy: [{ updatedAt: "desc" }, { createdAt: "desc" }],
+        select: { updatedAt: true }
       }),
       this.prisma.source.findMany({
         where: { deletedAt: null },
@@ -93,7 +99,7 @@ export class DashboardService {
       this.prisma.procurement.findMany({
         where: { deletedAt: null, source: { deletedAt: null } },
         take: 5,
-        orderBy: [{ publishedAt: "desc" }, { createdAt: "desc" }],
+        orderBy: [{ updatedAt: "desc" }, { publishedAt: "desc" }, { createdAt: "desc" }],
         include: {
           source: true,
           supplier: true
@@ -141,7 +147,8 @@ export class DashboardService {
       totalProcurements,
       activeSources,
       runsLast24h,
-      lastPublishedAt: latest?.publishedAt ?? null,
+      lastPublishedAt: latestPublished?.publishedAt ?? null,
+      lastUpdatedAt: latestUpdated?.updatedAt ?? null,
       bySource: sourcesSummary.map((item) => ({
         source: item.source,
         count: item.recordCount

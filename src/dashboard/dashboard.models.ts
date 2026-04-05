@@ -74,6 +74,9 @@ export class DashboardSummary {
   @Field(() => Date, { nullable: true })
   lastPublishedAt?: Date | null;
 
+  @Field(() => Date, { nullable: true })
+  lastUpdatedAt?: Date | null;
+
   @Field(() => [DashboardSourceStat])
   bySource!: DashboardSourceStat[];
 
