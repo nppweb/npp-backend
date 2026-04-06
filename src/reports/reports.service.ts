@@ -6,7 +6,7 @@ import {
   OnModuleDestroy,
   OnModuleInit
 } from "@nestjs/common";
-import { Prisma, ReportStatus, SourceRunStatus, UserRole } from "@prisma/client";
+import { Prisma, ProcurementStatus, ReportStatus, SourceRunStatus, UserRole } from "@prisma/client";
 import { AnalyticsService } from "../analytics/analytics.service";
 import { DashboardService } from "../dashboard/dashboard.service";
 import { PrismaService } from "../prisma/prisma.service";
@@ -82,6 +82,48 @@ type StoredReportSnapshot = {
     riskLevel: string;
   }>;
   supplierExposure: Awaited<ReturnType<AnalyticsService["summary"]>>["supplierExposure"];
+  supplierDueDiligence: Array<{
+    supplier: string;
+    taxId?: string;
+    ogrn?: string;
+    procurementCount: number;
+    activeProcurements: number;
+    totalAmount: number;
+    lastProcurementAt?: string | null;
+    companyStatus?: string;
+    registrationDate?: string | null;
+    region?: string;
+    okved?: string;
+    liquidationMark?: boolean | null;
+    riskSignalsCount: number;
+    activeRiskSignalsCount: number;
+    rnpEntriesCount: number;
+    activeRnpEntriesCount: number;
+    latestRiskAt?: string | null;
+    integrityScore: number;
+    flags: string[];
+  }>;
+  nppStationOrders: Array<{
+    station: string;
+    procurementCount: number;
+    contractCount: number;
+    totalAmount: number;
+    firstPublishedAt?: string | null;
+    lastPublishedAt?: string | null;
+    orders: Array<{
+      procurementId: string;
+      externalId: string;
+      title: string;
+      customer?: string | null;
+      supplier?: string | null;
+      source: string;
+      amount?: number | null;
+      currency?: string | null;
+      status: string;
+      publishedAt?: string | null;
+      sourceUrl?: string | null;
+    }>;
+  }>;
   recentSourceRuns: Array<{
     id: string;
     runKey: string;
@@ -117,6 +159,8 @@ type StoredReportSnapshot = {
 const REPORT_TYPE_LABELS: Record<string, string> = {
   "daily-overview": "Ежедневный обзор",
   "supplier-risk": "Риски поставщиков",
+  "supplier-due-diligence": "Добросовестность поставщиков",
+  "npp-station-orders": "Закупки по АЭС",
   "pipeline-incident": "Инциденты пайплайна"
 };
 
@@ -134,6 +178,18 @@ const REPORT_TEMPLATES: ReportDefinition[] = [
     cadenceHours: 24
   },
   {
+    type: "supplier-due-diligence",
+    title: "Добросовестность и благонадёжность поставщиков",
+    description: "Проверка поставщиков по ФНС, Федресурсу, РНП и закупочной активности.",
+    cadenceHours: 24
+  },
+  {
+    type: "npp-station-orders",
+    title: "Что заказывали АЭС",
+    description: "Отдельный отчёт по каждой АЭС: какие закупки и договоры публиковались и когда.",
+    cadenceHours: 12
+  },
+  {
     type: "pipeline-incident",
     title: "Надёжность парсеров и пайплайна",
     description: "Контроль проблемных запусков, потерь публикации и деградации источников.",
@@ -143,10 +199,56 @@ const REPORT_TEMPLATES: ReportDefinition[] = [
 
 const ROLE_REPORT_TYPES: Record<UserRole, string[]> = {
   USER: [],
-  ANALYST: ["daily-overview", "supplier-risk"],
+  ANALYST: ["daily-overview", "supplier-risk", "supplier-due-diligence", "npp-station-orders"],
   DEVELOPER: ["pipeline-incident"],
   ADMIN: REPORT_TEMPLATES.map((item) => item.type)
 };
+
+const DAY_MS = 24 * 60 * 60 * 1000;
+const NPP_PERIOD_START = new Date("2025-01-01T00:00:00+03:00");
+const NPP_SOURCE_CODES = ["eis", "eis_contracts", "eis_contracts_223"] as const;
+const NPP_STATION_MATCHERS = [
+  {
+    canonical: "Балаковская атомная станция",
+    variants: ["балаковская атомная станция", "балаковская аэс", "балаковская аэс-авто"]
+  },
+  {
+    canonical: "Белоярская атомная станция",
+    variants: ["белоярская атомная станция", "белоярская аэс"]
+  },
+  {
+    canonical: "Билибинская атомная станция",
+    variants: ["билибинская атомная станция", "билибинская аэс"]
+  },
+  {
+    canonical: "Калининская атомная станция",
+    variants: ["калининская атомная станция", "калининская аэс", "калининская аэс-сервис"]
+  },
+  {
+    canonical: "Кольская атомная станция",
+    variants: ["кольская атомная станция", "кольская аэс"]
+  },
+  {
+    canonical: "Курская атомная станция",
+    variants: ["курская атомная станция", "курская аэс", "курская аэс-сервис"]
+  },
+  {
+    canonical: "Ленинградская атомная станция",
+    variants: ["ленинградская атомная станция", "ленинградская аэс", "ленинградская аэс-авто"]
+  },
+  {
+    canonical: "Нововоронежская атомная станция",
+    variants: ["нововоронежская атомная станция", "нововоронежская аэс"]
+  },
+  {
+    canonical: "Ростовская атомная станция",
+    variants: ["ростовская атомная станция", "ростовская аэс"]
+  },
+  {
+    canonical: "Смоленская атомная станция",
+    variants: ["смоленская атомная станция", "смоленская аэс", "смоленская аэс-сервис"]
+  }
+] as const;
 
 @Injectable()
 export class ReportsService implements OnModuleInit, OnModuleDestroy {
@@ -376,6 +478,21 @@ export class ReportsService implements OnModuleInit, OnModuleDestroy {
         lastRunAt: item.lastRunAt ? new Date(item.lastRunAt) : null
       })),
       supplierExposure: snapshot.supplierExposure,
+      supplierDueDiligence: snapshot.supplierDueDiligence.map((item) => ({
+        ...item,
+        lastProcurementAt: item.lastProcurementAt ? new Date(item.lastProcurementAt) : null,
+        registrationDate: item.registrationDate ? new Date(item.registrationDate) : null,
+        latestRiskAt: item.latestRiskAt ? new Date(item.latestRiskAt) : null
+      })),
+      nppStationOrders: snapshot.nppStationOrders.map((item) => ({
+        ...item,
+        firstPublishedAt: item.firstPublishedAt ? new Date(item.firstPublishedAt) : null,
+        lastPublishedAt: item.lastPublishedAt ? new Date(item.lastPublishedAt) : null,
+        orders: item.orders.map((order) => ({
+          ...order,
+          publishedAt: order.publishedAt ? new Date(order.publishedAt) : null
+        }))
+      })),
       recentSourceRuns: snapshot.recentSourceRuns.map((item) => ({
         ...item,
         startedAt: new Date(item.startedAt),
@@ -410,6 +527,21 @@ export class ReportsService implements OnModuleInit, OnModuleDestroy {
         lastRunAt: item.lastRunAt ? item.lastRunAt.toISOString() : null
       })),
       supplierExposure: detail.supplierExposure,
+      supplierDueDiligence: detail.supplierDueDiligence.map((item) => ({
+        ...item,
+        lastProcurementAt: item.lastProcurementAt ? item.lastProcurementAt.toISOString() : null,
+        registrationDate: item.registrationDate ? item.registrationDate.toISOString() : null,
+        latestRiskAt: item.latestRiskAt ? item.latestRiskAt.toISOString() : null
+      })),
+      nppStationOrders: detail.nppStationOrders.map((item) => ({
+        ...item,
+        firstPublishedAt: item.firstPublishedAt ? item.firstPublishedAt.toISOString() : null,
+        lastPublishedAt: item.lastPublishedAt ? item.lastPublishedAt.toISOString() : null,
+        orders: item.orders.map((order) => ({
+          ...order,
+          publishedAt: order.publishedAt ? order.publishedAt.toISOString() : null
+        }))
+      })),
       recentSourceRuns: detail.recentSourceRuns.map((item) => ({
         ...item,
         startedAt: item.startedAt.toISOString(),
@@ -442,6 +574,8 @@ export class ReportsService implements OnModuleInit, OnModuleDestroy {
       sourceContribution: liveDetail.sourceContribution,
       sourceHealth: liveDetail.sourceHealth,
       supplierExposure: liveDetail.supplierExposure,
+      supplierDueDiligence: liveDetail.supplierDueDiligence,
+      nppStationOrders: liveDetail.nppStationOrders,
       recentSourceRuns: liveDetail.recentSourceRuns,
       recentProcurements: liveDetail.recentProcurements
     };
@@ -531,9 +665,96 @@ export class ReportsService implements OnModuleInit, OnModuleDestroy {
           sourceContribution,
           sourceHealth: analytics.sourceHealth.filter((item) => item.riskLevel !== "STABLE"),
           supplierExposure: analytics.supplierExposure,
+          supplierDueDiligence: [],
+          nppStationOrders: [],
           recentSourceRuns: recentProblematicRuns,
           recentProcurements: this.selectLargestProcurements(analytics.attentionProcurements)
         };
+      case "supplier-due-diligence": {
+        const supplierDueDiligence = await this.buildSupplierDueDiligenceItems();
+
+        return {
+          status: liveStatus,
+          generatedAt,
+          metrics: this.buildSupplierDueDiligenceMetrics(supplierDueDiligence),
+          highlights: this.buildSupplierDueDiligenceHighlights(supplierDueDiligence),
+          scores: this.buildSupplierDueDiligenceScores(supplierDueDiligence),
+          actions: this.buildSupplierDueDiligenceActions(supplierDueDiligence),
+          deadlinePressure: analytics.deadlinePressure,
+          statusMix,
+          amountDistribution,
+          customerExposure,
+          sourceContribution,
+          sourceHealth: analytics.sourceHealth.filter((item) => item.riskLevel !== "STABLE"),
+          supplierExposure: analytics.supplierExposure,
+          supplierDueDiligence,
+          nppStationOrders: [],
+          recentSourceRuns: recentProblematicRuns,
+          recentProcurements: this.selectLargestProcurements(analytics.attentionProcurements)
+        };
+      }
+      case "npp-station-orders": {
+        const nppStationOrders = await this.buildNppStationOrderItems();
+        const nppProcurementSignals = nppStationOrders.flatMap((station) =>
+          station.orders.map((order) => ({
+            id: order.procurementId,
+            externalId: order.externalId,
+            title: order.title,
+            status: order.status,
+            amount: order.amount ?? null,
+            currency: order.currency ?? null,
+            deadlineAt: null,
+            publishedAt: order.publishedAt ?? null,
+            customerName: order.customer ?? null,
+            sourceCode: order.source,
+            sourceName: order.source,
+            supplierName: order.supplier ?? null
+          }))
+        );
+
+        return {
+          status: liveStatus,
+          generatedAt,
+          metrics: this.buildNppStationOrderMetrics(nppStationOrders),
+          highlights: this.buildNppStationOrderHighlights(nppStationOrders),
+          scores: this.buildNppStationOrderScores(nppStationOrders),
+          actions: this.buildNppStationOrderActions(nppStationOrders),
+          deadlinePressure: analytics.deadlinePressure,
+          statusMix: this.buildStatusMix(nppProcurementSignals),
+          amountDistribution: this.buildAmountDistribution(nppProcurementSignals),
+          customerExposure: this.buildCustomerExposure(nppProcurementSignals),
+          sourceContribution: this.buildSourceContribution(nppProcurementSignals),
+          sourceHealth: analytics.sourceHealth.filter((item) =>
+            (NPP_SOURCE_CODES as readonly string[]).includes(item.source)
+          ),
+          supplierExposure: analytics.supplierExposure,
+          supplierDueDiligence: [],
+          nppStationOrders,
+          recentSourceRuns: recentProblematicRuns.filter((run) =>
+            (NPP_SOURCE_CODES as readonly string[]).includes(run.sourceCode)
+          ),
+          recentProcurements: nppStationOrders.flatMap((station) =>
+            station.orders.map((order) => ({
+              id: order.procurementId,
+              externalId: order.externalId,
+              source: order.source,
+              title: order.title,
+              description: undefined,
+              customer: order.customer ?? undefined,
+              supplier: order.supplier ?? undefined,
+              amount: order.amount ?? undefined,
+              currency: order.currency ?? undefined,
+              status: order.status as ProcurementStatus,
+              publishedAt: order.publishedAt ?? undefined,
+              deadlineAt: undefined,
+              sourceUrl: order.sourceUrl ?? undefined,
+              createdAt: undefined,
+              updatedAt: undefined,
+              rawPayload: { sourceSpecificData: { targetStationName: station.station } }
+            }))
+          ).slice(0, 12)
+        };
+      }
       case "pipeline-incident":
         return {
           status: liveStatus,
@@ -549,6 +770,8 @@ export class ReportsService implements OnModuleInit, OnModuleDestroy {
           sourceContribution,
           sourceHealth: analytics.sourceHealth.filter((item) => item.riskLevel !== "STABLE"),
           supplierExposure: analytics.supplierExposure.slice(0, 3),
+          supplierDueDiligence: [],
+          nppStationOrders: [],
           recentSourceRuns: recentProblematicRuns,
           recentProcurements: analytics.attentionProcurements.slice(0, 4)
         };
@@ -568,6 +791,8 @@ export class ReportsService implements OnModuleInit, OnModuleDestroy {
           sourceContribution,
           sourceHealth: analytics.sourceHealth,
           supplierExposure: analytics.supplierExposure,
+          supplierDueDiligence: [],
+          nppStationOrders: [],
           recentSourceRuns: dashboard.recentSourceRuns,
           recentProcurements: this.selectLargestProcurements(dashboard.recentProcurements)
         };
@@ -618,6 +843,10 @@ export class ReportsService implements OnModuleInit, OnModuleDestroy {
       return hasSupplierRiskData ? ReportStatus.READY : ReportStatus.PENDING;
     }
 
+    if (reportType === "supplier-due-diligence" || reportType === "npp-station-orders") {
+      return dashboard.totalProcurements > 0 ? ReportStatus.READY : ReportStatus.PENDING;
+    }
+
     return dashboard.totalRecords > 0 || dashboard.totalProcurements > 0 ? ReportStatus.READY : ReportStatus.PENDING;
   }
 
@@ -657,6 +886,14 @@ export class ReportsService implements OnModuleInit, OnModuleDestroy {
           .filter((value): value is Date => value instanceof Date)
       );
       dates.push(...dashboard.recentSourceRuns.map((item) => item.startedAt));
+    }
+
+    if (reportType === "supplier-due-diligence" || reportType === "npp-station-orders") {
+      dates.push(...dashboard.recentSourceRuns.map((item) => item.startedAt));
+
+      if (dashboard.lastPublishedAt) {
+        dates.push(dashboard.lastPublishedAt);
+      }
     }
 
     return new Date(Math.max(...dates.map((value) => value.getTime())));
@@ -1000,6 +1237,666 @@ export class ReportsService implements OnModuleInit, OnModuleDestroy {
     return actions.slice(0, 3);
   }
 
+  private async buildSupplierDueDiligenceItems() {
+    const [suppliers, registryEntries] = await Promise.all([
+      this.prisma.supplier.findMany({
+        where: {
+          deletedAt: null,
+          OR: [
+            { procurements: { some: { deletedAt: null, source: { deletedAt: null } } } },
+            { riskSignals: { some: { deletedAt: null } } },
+            { companyProfiles: { some: { deletedAt: null } } }
+          ]
+        },
+        include: {
+          procurements: {
+            where: {
+              deletedAt: null,
+              source: { deletedAt: null }
+            },
+            select: {
+              id: true,
+              amount: true,
+              status: true,
+              publishedAt: true,
+              createdAt: true
+            }
+          },
+          riskSignals: {
+            where: { deletedAt: null },
+            select: {
+              publishedAt: true,
+              eventDate: true,
+              createdAt: true
+            }
+          },
+          companyProfiles: {
+            where: { deletedAt: null },
+            orderBy: [{ updatedAt: "desc" }],
+            take: 1,
+            select: {
+              companyStatus: true,
+              registrationDate: true,
+              region: true,
+              okved: true,
+              liquidationMark: true
+            }
+          }
+        }
+      }),
+      this.prisma.registryRecord.findMany({
+        where: { deletedAt: null },
+        select: {
+          supplierName: true,
+          supplierInn: true,
+          supplierOgrn: true,
+          registryStatus: true,
+          inclusionDate: true,
+          exclusionDate: true,
+          createdAt: true
+        }
+      })
+    ]);
+
+    const registryByKey = new Map<
+      string,
+      Array<{
+        supplierName: string;
+        supplierInn: string | null;
+        supplierOgrn: string | null;
+        registryStatus: string | null;
+        inclusionDate: Date | null;
+        exclusionDate: Date | null;
+        createdAt: Date;
+      }>
+    >();
+
+    for (const entry of registryEntries) {
+      const key = resolveSupplierKey({
+        supplier: entry.supplierName,
+        taxId: entry.supplierInn ?? undefined,
+        ogrn: entry.supplierOgrn ?? undefined
+      });
+
+      if (!registryByKey.has(key)) {
+        registryByKey.set(key, []);
+      }
+
+      registryByKey.get(key)?.push(entry);
+    }
+
+    const activeRiskThreshold = new Date(Date.now() - 180 * DAY_MS);
+
+    const supplierItems = suppliers
+      .map((supplier) => {
+        const key = resolveSupplierKey({
+          supplier: supplier.name,
+          taxId: supplier.taxId ?? undefined,
+          ogrn: supplier.ogrn ?? undefined
+        });
+        const latestProfile = supplier.companyProfiles[0];
+        const relatedRegistryEntries = registryByKey.get(key) ?? [];
+        const procurementCount = supplier.procurements.length;
+        const activeProcurements = supplier.procurements.filter(
+          (item) => item.status === ProcurementStatus.ACTIVE
+        ).length;
+        const totalAmount = supplier.procurements.reduce((sum, item) => sum + (item.amount ?? 0), 0);
+        const lastProcurementAt = supplier.procurements.reduce<Date | null>((latest, item) => {
+          const candidate = item.publishedAt ?? item.createdAt;
+          if (!latest || candidate.getTime() > latest.getTime()) {
+            return candidate;
+          }
+
+          return latest;
+        }, null);
+        const latestRiskAt = supplier.riskSignals.reduce<Date | null>((latest, item) => {
+          const candidate = item.eventDate ?? item.publishedAt ?? item.createdAt;
+          if (!latest || candidate.getTime() > latest.getTime()) {
+            return candidate;
+          }
+
+          return latest;
+        }, null);
+        const activeRiskSignalsCount = supplier.riskSignals.filter((item) => {
+          const eventAt = item.eventDate ?? item.publishedAt ?? item.createdAt;
+          return eventAt.getTime() >= activeRiskThreshold.getTime();
+        }).length;
+        const activeRnpEntriesCount = relatedRegistryEntries.filter((item) =>
+          isRegistryEntryActive(item.registryStatus, item.exclusionDate)
+        ).length;
+        const flags = buildSupplierDueDiligenceFlags({
+          taxId: supplier.taxId ?? undefined,
+          ogrn: supplier.ogrn ?? undefined,
+          latestProfile,
+          activeRiskSignalsCount,
+          activeRnpEntriesCount,
+          procurementCount
+        });
+
+        return {
+          supplier: supplier.name,
+          taxId: supplier.taxId ?? undefined,
+          ogrn: supplier.ogrn ?? undefined,
+          procurementCount,
+          activeProcurements,
+          totalAmount: this.roundMetric(totalAmount),
+          lastProcurementAt,
+          companyStatus: latestProfile?.companyStatus ?? undefined,
+          registrationDate: latestProfile?.registrationDate ?? null,
+          region: latestProfile?.region ?? undefined,
+          okved: latestProfile?.okved ?? undefined,
+          liquidationMark: latestProfile?.liquidationMark ?? null,
+          riskSignalsCount: supplier.riskSignals.length,
+          activeRiskSignalsCount,
+          rnpEntriesCount: relatedRegistryEntries.length,
+          activeRnpEntriesCount,
+          latestRiskAt,
+          integrityScore: this.calculateSupplierIntegrityScore({
+            hasTaxId: Boolean(supplier.taxId),
+            hasOgrn: Boolean(supplier.ogrn),
+            hasProfile: Boolean(latestProfile),
+            liquidationMark: latestProfile?.liquidationMark === true,
+            activeRiskSignalsCount,
+            activeRnpEntriesCount
+          }),
+          flags
+        };
+      })
+      .sort(
+        (left, right) =>
+          right.activeRnpEntriesCount - left.activeRnpEntriesCount ||
+          right.activeRiskSignalsCount - left.activeRiskSignalsCount ||
+          left.integrityScore - right.integrityScore ||
+          right.totalAmount - left.totalAmount
+      );
+    const existingKeys = new Set(
+      supplierItems.map((item) =>
+        resolveSupplierKey({
+          supplier: item.supplier,
+          taxId: item.taxId,
+          ogrn: item.ogrn
+        })
+      )
+    );
+    const registryOnlyItems = Array.from(registryByKey.entries())
+      .filter(([key]) => !existingKeys.has(key))
+      .map(([_key, entries]) => {
+        const latest = [...entries].sort(
+          (left, right) =>
+            (right.inclusionDate?.getTime() ?? right.createdAt.getTime()) -
+            (left.inclusionDate?.getTime() ?? left.createdAt.getTime())
+        )[0];
+        const activeRnpEntriesCount = entries.filter((item) =>
+          isRegistryEntryActive(item.registryStatus, item.exclusionDate)
+        ).length;
+        const supplier = latest?.supplierName ?? "Поставщик без карточки";
+
+        return {
+          supplier,
+          taxId: latest?.supplierInn ?? undefined,
+          ogrn: latest?.supplierOgrn ?? undefined,
+          procurementCount: 0,
+          activeProcurements: 0,
+          totalAmount: 0,
+          lastProcurementAt: null,
+          companyStatus: undefined,
+          registrationDate: null,
+          region: undefined,
+          okved: undefined,
+          liquidationMark: null,
+          riskSignalsCount: 0,
+          activeRiskSignalsCount: 0,
+          rnpEntriesCount: entries.length,
+          activeRnpEntriesCount,
+          latestRiskAt: latest?.inclusionDate ?? latest?.createdAt ?? null,
+          integrityScore: this.calculateSupplierIntegrityScore({
+            hasTaxId: Boolean(latest?.supplierInn),
+            hasOgrn: Boolean(latest?.supplierOgrn),
+            hasProfile: false,
+            liquidationMark: false,
+            activeRiskSignalsCount: 0,
+            activeRnpEntriesCount
+          }),
+          flags: buildSupplierDueDiligenceFlags({
+            taxId: latest?.supplierInn ?? undefined,
+            ogrn: latest?.supplierOgrn ?? undefined,
+            latestProfile: undefined,
+            activeRiskSignalsCount: 0,
+            activeRnpEntriesCount,
+            procurementCount: 0
+          })
+        };
+      });
+
+    return [...supplierItems, ...registryOnlyItems].sort(
+      (left, right) =>
+        right.activeRnpEntriesCount - left.activeRnpEntriesCount ||
+        right.activeRiskSignalsCount - left.activeRiskSignalsCount ||
+        left.integrityScore - right.integrityScore ||
+        right.totalAmount - left.totalAmount
+    );
+  }
+
+  private buildSupplierDueDiligenceMetrics(
+    items: Awaited<ReturnType<ReportsService["buildSupplierDueDiligenceItems"]>>
+  ) {
+    const withProfiles = items.filter((item) => item.companyStatus || item.registrationDate || item.okved).length;
+    const withRedFlags = items.filter((item) => item.flags.length > 0).length;
+    const activeRnp = items.filter((item) => item.activeRnpEntriesCount > 0).length;
+
+    return [
+      {
+        label: "Поставщиков в мониторинге",
+        value: this.formatInteger(items.length),
+        hint: "Учитываются собранные поставщики из закупок и контрагентских источников."
+      },
+      {
+        label: "Профили ФНС найдены",
+        value: this.formatInteger(withProfiles),
+        hint: "Есть регистрационные данные, статус или отраслевой профиль."
+      },
+      {
+        label: "Поставщики с флагами",
+        value: this.formatInteger(withRedFlags),
+        hint: "Требуют проверки по РНП, Федресурсу, ликвидации или неполным реквизитам."
+      },
+      {
+        label: "Активный риск по РНП",
+        value: this.formatInteger(activeRnp),
+        hint: "Поставщики с действующими или не закрытыми записями в реестре."
+      }
+    ];
+  }
+
+  private buildSupplierDueDiligenceHighlights(
+    items: Awaited<ReturnType<ReportsService["buildSupplierDueDiligenceItems"]>>
+  ) {
+    const highestRisk = items[0];
+    const liquidationCompanies = items.filter((item) => item.liquidationMark).length;
+    const incompleteProfiles = items.filter((item) => !item.taxId || !item.ogrn || !item.companyStatus).length;
+
+    return [
+      {
+        title: "Самый рискованный поставщик",
+        description: highestRisk
+          ? `${highestRisk.supplier}: score ${this.formatInteger(highestRisk.integrityScore)}, флаги: ${highestRisk.flags.join(", ") || "нет"}.`
+          : "Поставщики для проверки пока не накоплены.",
+        severity: highestRisk && highestRisk.flags.length > 0 ? "warning" : "info"
+      },
+      {
+        title: "Признаки ликвидации",
+        description:
+          liquidationCompanies > 0
+            ? `У ${this.formatInteger(liquidationCompanies)} поставщиков есть отметка о ликвидации или прекращении деятельности.`
+            : "Признаков ликвидации по текущим профилям не найдено.",
+        severity: liquidationCompanies > 0 ? "destructive" : "success"
+      },
+      {
+        title: "Полнота карточек",
+        description:
+          incompleteProfiles > 0
+            ? `У ${this.formatInteger(incompleteProfiles)} поставщиков не хватает ключевых реквизитов или статуса компании.`
+            : "Карточки поставщиков заполнены достаточно полно для базовой проверки.",
+        severity: incompleteProfiles > 0 ? "warning" : "success"
+      }
+    ];
+  }
+
+  private buildSupplierDueDiligenceScores(
+    items: Awaited<ReturnType<ReportsService["buildSupplierDueDiligenceItems"]>>
+  ) {
+    const total = Math.max(items.length, 1);
+    const withProfiles = items.filter((item) => item.companyStatus || item.registrationDate || item.okved).length;
+    const withIdentifiers = items.filter((item) => item.taxId && item.ogrn).length;
+    const withFlags = items.filter((item) => item.flags.length > 0).length;
+    const activeRnp = items.filter((item) => item.activeRnpEntriesCount > 0).length;
+
+    return [
+      {
+        label: "Покрытие профилями",
+        value: this.clampScore((withProfiles / total) * 100),
+        detail: "Доля поставщиков, по которым уже есть профиль компании или регистрационные признаки.",
+        severity: withProfiles / total < 0.7 ? "warning" : "success"
+      },
+      {
+        label: "Качество реквизитов",
+        value: this.clampScore((withIdentifiers / total) * 100),
+        detail: "Показывает, насколько слой поставщиков пригоден для уверенного матчинга и комплаенса.",
+        severity: withIdentifiers / total < 0.6 ? "warning" : "success"
+      },
+      {
+        label: "Давление негативных сигналов",
+        value: this.clampScore(100 - (withFlags / total) * 100),
+        detail: "Чем больше флагов в карточках поставщиков, тем ниже итоговый балл.",
+        severity: withFlags / total > 0.35 ? "warning" : "success"
+      },
+      {
+        label: "Чистота по РНП",
+        value: this.clampScore(100 - (activeRnp / total) * 100),
+        detail: "Доля поставщиков без активных записей в реестре недобросовестных поставщиков.",
+        severity: activeRnp > 0 ? "destructive" : "success"
+      }
+    ];
+  }
+
+  private buildSupplierDueDiligenceActions(
+    items: Awaited<ReturnType<ReportsService["buildSupplierDueDiligenceItems"]>>
+  ) {
+    const actions = [];
+    const rnpSuppliers = items.filter((item) => item.activeRnpEntriesCount > 0);
+    const incompleteSuppliers = items.filter((item) => !item.taxId || !item.ogrn || !item.companyStatus);
+    const liquidationSuppliers = items.filter((item) => item.liquidationMark);
+
+    if (rnpSuppliers.length > 0) {
+      actions.push({
+        title: "Перепроверить поставщиков из РНП",
+        description: `В мониторинге ${this.formatInteger(rnpSuppliers.length)} поставщиков с активными записями или незакрытым риском по РНП.`,
+        priority: "Высокий"
+      });
+    }
+
+    if (liquidationSuppliers.length > 0) {
+      actions.push({
+        title: "Проверить компании с признаками ликвидации",
+        description: `У ${this.formatInteger(liquidationSuppliers.length)} карточек есть риск ликвидации или прекращения деятельности.`,
+        priority: "Высокий"
+      });
+    }
+
+    if (incompleteSuppliers.length > 0) {
+      actions.push({
+        title: "Добрать идентификаторы и профили",
+        description: `Для ${this.formatInteger(incompleteSuppliers.length)} поставщиков не хватает ИНН, ОГРН или статуса компании для качественной аналитики.`,
+        priority: "Средний"
+      });
+    }
+
+    return actions.slice(0, 3);
+  }
+
+  private async buildNppStationOrderItems() {
+    const procurements = await this.prisma.procurement.findMany({
+      where: {
+        deletedAt: null,
+        source: {
+          deletedAt: null,
+          code: { in: [...NPP_SOURCE_CODES] }
+        },
+        OR: [{ publishedAt: { gte: NPP_PERIOD_START } }, { createdAt: { gte: NPP_PERIOD_START } }]
+      },
+      include: {
+        source: true,
+        supplier: true
+      },
+      orderBy: [{ publishedAt: "desc" }, { createdAt: "desc" }]
+    });
+
+    const grouped = new Map<
+      string,
+      {
+        station: string;
+        procurementCount: number;
+        contractCount: number;
+        totalAmount: number;
+        firstPublishedAt: Date | null;
+        lastPublishedAt: Date | null;
+        orders: Array<{
+          procurementId: string;
+          externalId: string;
+          title: string;
+          customer?: string;
+          supplier?: string;
+          source: string;
+          amount?: number | null;
+          currency?: string | null;
+          status: ProcurementStatus;
+          publishedAt?: Date | null;
+          sourceUrl?: string | null;
+        }>;
+      }
+    >();
+
+    for (const item of procurements) {
+      const station = resolveTargetStationName(item.rawPayload, item.title, item.customerName);
+
+      if (!station) {
+        continue;
+      }
+
+      const effectiveDate = item.publishedAt ?? item.createdAt;
+      const sourceType = resolveSourceType(item.rawPayload);
+      const current = grouped.get(station) ?? {
+        station,
+        procurementCount: 0,
+        contractCount: 0,
+        totalAmount: 0,
+        firstPublishedAt: null,
+        lastPublishedAt: null,
+        orders: []
+      };
+
+      current.procurementCount += 1;
+      current.contractCount += sourceType === "contract" ? 1 : 0;
+      current.totalAmount += item.amount ?? 0;
+      current.firstPublishedAt =
+        !current.firstPublishedAt || effectiveDate.getTime() < current.firstPublishedAt.getTime()
+          ? effectiveDate
+          : current.firstPublishedAt;
+      current.lastPublishedAt =
+        !current.lastPublishedAt || effectiveDate.getTime() > current.lastPublishedAt.getTime()
+          ? effectiveDate
+          : current.lastPublishedAt;
+      current.orders.push({
+        procurementId: item.id,
+        externalId: item.externalId,
+        title: item.title,
+        customer: item.customerName ?? undefined,
+        supplier: item.supplier?.name ?? undefined,
+        source: item.source.code,
+        amount: item.amount,
+        currency: item.currency,
+        status: item.status,
+        publishedAt: item.publishedAt ?? item.createdAt,
+        sourceUrl: item.sourceUrl
+      });
+      grouped.set(station, current);
+    }
+
+    return Array.from(grouped.values())
+      .map((item) => ({
+        station: item.station,
+        procurementCount: item.procurementCount,
+        contractCount: item.contractCount,
+        totalAmount: this.roundMetric(item.totalAmount),
+        firstPublishedAt: item.firstPublishedAt,
+        lastPublishedAt: item.lastPublishedAt,
+        orders: item.orders.sort(
+          (left, right) => (right.publishedAt?.getTime() ?? 0) - (left.publishedAt?.getTime() ?? 0)
+        )
+      }))
+      .sort((left, right) => right.procurementCount - left.procurementCount || left.station.localeCompare(right.station));
+  }
+
+  private buildNppStationOrderMetrics(
+    items: Awaited<ReturnType<ReportsService["buildNppStationOrderItems"]>>
+  ) {
+    const procurementCount = items.reduce((sum, item) => sum + item.procurementCount, 0);
+    const contractCount = items.reduce((sum, item) => sum + item.contractCount, 0);
+    const totalAmount = items.reduce((sum, item) => sum + item.totalAmount, 0);
+
+    return [
+      {
+        label: "АЭС в контуре",
+        value: this.formatInteger(items.length),
+        hint: "Станции, по которым уже найдены релевантные закупки или договоры."
+      },
+      {
+        label: "Всего заказов",
+        value: this.formatInteger(procurementCount),
+        hint: `Договоров: ${this.formatInteger(contractCount)}`
+      },
+      {
+        label: "Сумма контура",
+        value: new Intl.NumberFormat("ru-RU", { maximumFractionDigits: 0 }).format(totalAmount),
+        hint: "Суммарный объём закупок и контрактов по АЭС с заполненной суммой."
+      },
+      {
+        label: "Покрытие станций",
+        value: this.formatPercent((items.length / NPP_STATION_MATCHERS.length) * 100),
+        hint: "Сколько станций уже попало в атомный аналитический слой."
+      }
+    ];
+  }
+
+  private buildNppStationOrderHighlights(
+    items: Awaited<ReturnType<ReportsService["buildNppStationOrderItems"]>>
+  ) {
+    const topByAmount = [...items].sort((left, right) => right.totalAmount - left.totalAmount)[0];
+    const latestStation = [...items].sort(
+      (left, right) => (right.lastPublishedAt?.getTime() ?? 0) - (left.lastPublishedAt?.getTime() ?? 0)
+    )[0];
+    const uncoveredStations = NPP_STATION_MATCHERS.length - items.length;
+
+    return [
+      {
+        title: "Лидер по сумме заказов",
+        description: topByAmount
+          ? `${topByAmount.station}: ${this.formatInteger(topByAmount.procurementCount)} записей на ${new Intl.NumberFormat("ru-RU", { maximumFractionDigits: 0 }).format(topByAmount.totalAmount)} RUB.`
+          : "Данных по АЭС пока недостаточно.",
+        severity: topByAmount ? "info" : "warning"
+      },
+      {
+        title: "Последняя активность",
+        description: latestStation?.lastPublishedAt
+          ? `${latestStation.station} публиковала закупки до ${latestStation.lastPublishedAt.toLocaleDateString("ru-RU")}.`
+          : "Свежей активности по АЭС пока не найдено.",
+        severity: latestStation?.lastPublishedAt ? "success" : "warning"
+      },
+      {
+        title: "Пробелы покрытия",
+        description:
+          uncoveredStations > 0
+            ? `В атомном контуре пока не хватает данных по ${this.formatInteger(uncoveredStations)} станциям.`
+            : "По всем базовым АЭС уже есть данные в аналитическом контуре.",
+        severity: uncoveredStations > 0 ? "warning" : "success"
+      }
+    ];
+  }
+
+  private buildNppStationOrderScores(
+    items: Awaited<ReturnType<ReportsService["buildNppStationOrderItems"]>>
+  ) {
+    const procurementCount = Math.max(
+      items.reduce((sum, item) => sum + item.procurementCount, 0),
+      1
+    );
+    const amountFilled = items
+      .flatMap((item) => item.orders)
+      .filter((order) => typeof order.amount === "number").length;
+    const contractCount = items.reduce((sum, item) => sum + item.contractCount, 0);
+    const recentStations = items.filter(
+      (item) => (item.lastPublishedAt?.getTime() ?? 0) >= Date.now() - 90 * DAY_MS
+    ).length;
+
+    return [
+      {
+        label: "Покрытие станций",
+        value: this.clampScore((items.length / NPP_STATION_MATCHERS.length) * 100),
+        detail: "Доля АЭС, по которым в системе уже есть закупочные записи.",
+        severity: items.length < NPP_STATION_MATCHERS.length / 2 ? "warning" : "success"
+      },
+      {
+        label: "Заполненность сумм",
+        value: this.clampScore((amountFilled / procurementCount) * 100),
+        detail: "Можно ли сравнивать станции не только по числу записей, но и по деньгам.",
+        severity: amountFilled / procurementCount < 0.65 ? "warning" : "success"
+      },
+      {
+        label: "Контрактный слой",
+        value: this.clampScore((contractCount / procurementCount) * 100),
+        detail: "Показывает, насколько глубоко контур покрывает не только закупки, но и договоры.",
+        severity: contractCount === 0 ? "warning" : "success"
+      },
+      {
+        label: "Свежесть покрытия",
+        value: this.clampScore((recentStations / Math.max(items.length, 1)) * 100),
+        detail: "Доля станций, по которым есть активность в последние 90 дней.",
+        severity: recentStations < Math.max(1, Math.ceil(items.length / 2)) ? "warning" : "success"
+      }
+    ];
+  }
+
+  private buildNppStationOrderActions(
+    items: Awaited<ReturnType<ReportsService["buildNppStationOrderItems"]>>
+  ) {
+    const actions = [];
+    const uncoveredStations = NPP_STATION_MATCHERS.filter(
+      (station) => !items.some((item) => item.station === station.canonical)
+    );
+    const staleStations = items.filter(
+      (item) => (item.lastPublishedAt?.getTime() ?? 0) < Date.now() - 120 * DAY_MS
+    );
+    const noContracts = items.filter((item) => item.contractCount === 0);
+
+    if (uncoveredStations.length > 0) {
+      actions.push({
+        title: "Расширить покрытие АЭС",
+        description: `Пока нет данных по станциям: ${uncoveredStations.map((item) => item.canonical).join(", ")}.`,
+        priority: "Высокий"
+      });
+    }
+
+    if (staleStations.length > 0) {
+      actions.push({
+        title: "Проверить станции без свежей активности",
+        description: `У ${this.formatInteger(staleStations.length)} АЭС давно не было новых публикаций в аналитическом контуре.`,
+        priority: "Средний"
+      });
+    }
+
+    if (noContracts.length > 0) {
+      actions.push({
+        title: "Добрать слой контрактов",
+        description: `Для ${this.formatInteger(noContracts.length)} станций видны закупки, но пока не хватает договорного следа.`,
+        priority: "Средний"
+      });
+    }
+
+    return actions.slice(0, 3);
+  }
+
+  private calculateSupplierIntegrityScore(input: {
+    hasTaxId: boolean;
+    hasOgrn: boolean;
+    hasProfile: boolean;
+    liquidationMark: boolean;
+    activeRiskSignalsCount: number;
+    activeRnpEntriesCount: number;
+  }) {
+    let score = 100;
+
+    if (!input.hasTaxId) {
+      score -= 10;
+    }
+
+    if (!input.hasOgrn) {
+      score -= 10;
+    }
+
+    if (!input.hasProfile) {
+      score -= 15;
+    }
+
+    if (input.liquidationMark) {
+      score -= 25;
+    }
+
+    score -= Math.min(input.activeRiskSignalsCount * 8, 24);
+    score -= Math.min(input.activeRnpEntriesCount * 45, 45);
+
+    return this.clampScore(score);
+  }
+
   private buildStatusMix(procurements: LiveProcurementSignal[]) {
     const total = Math.max(procurements.length, 1);
     const counts = new Map<string, number>();
@@ -1195,4 +2092,129 @@ export class ReportsService implements OnModuleInit, OnModuleDestroy {
   private formatPercent(value: number) {
     return `${new Intl.NumberFormat("ru-RU", { maximumFractionDigits: 1 }).format(value)}%`;
   }
+}
+
+function buildSupplierDueDiligenceFlags(input: {
+  taxId?: string;
+  ogrn?: string;
+  latestProfile?: {
+    companyStatus: string | null;
+    registrationDate: Date | null;
+    region: string | null;
+    okved: string | null;
+    liquidationMark: boolean | null;
+  };
+  activeRiskSignalsCount: number;
+  activeRnpEntriesCount: number;
+  procurementCount: number;
+}) {
+  const flags: string[] = [];
+
+  if (input.activeRnpEntriesCount > 0) {
+    flags.push("Активная запись в РНП");
+  }
+
+  if (input.activeRiskSignalsCount > 0) {
+    flags.push("Есть свежие риск-сигналы");
+  }
+
+  if (input.latestProfile?.liquidationMark) {
+    flags.push("Есть признак ликвидации");
+  }
+
+  if (!input.latestProfile) {
+    flags.push("Нет профиля ФНС");
+  }
+
+  if (!input.taxId || !input.ogrn) {
+    flags.push("Не хватает ИНН/ОГРН");
+  }
+
+  if (input.procurementCount === 0) {
+    flags.push("Нет закупочной истории");
+  }
+
+  return flags;
+}
+
+function isRegistryEntryActive(registryStatus: string | null, exclusionDate: Date | null) {
+  const normalizedStatus = (registryStatus ?? "").toLowerCase();
+
+  if (normalizedStatus.includes("исключ")) {
+    return false;
+  }
+
+  if (!exclusionDate) {
+    return true;
+  }
+
+  return exclusionDate.getTime() > Date.now();
+}
+
+function getSourceSpecificData(rawPayload: unknown) {
+  if (!rawPayload || typeof rawPayload !== "object" || Array.isArray(rawPayload)) {
+    return undefined;
+  }
+
+  const payload = rawPayload as Record<string, unknown>;
+  const candidate = payload.sourceSpecificData;
+
+  if (!candidate || typeof candidate !== "object" || Array.isArray(candidate)) {
+    return undefined;
+  }
+
+  return candidate as Record<string, unknown>;
+}
+
+function resolveSourceType(rawPayload: unknown): string | undefined {
+  const sourceSpecificData = getSourceSpecificData(rawPayload);
+  return typeof sourceSpecificData?.sourceType === "string" ? sourceSpecificData.sourceType : undefined;
+}
+
+function resolveTargetStationName(
+  rawPayload: unknown,
+  title: string,
+  customerName: string | null
+): string | undefined {
+  const sourceSpecificData = getSourceSpecificData(rawPayload);
+  const explicitStationName =
+    typeof sourceSpecificData?.targetStationName === "string" ? sourceSpecificData.targetStationName : undefined;
+
+  if (explicitStationName) {
+    return explicitStationName;
+  }
+
+  const haystack = [title, customerName]
+    .filter(Boolean)
+    .join(" ")
+    .toLowerCase();
+
+  if (!haystack) {
+    return undefined;
+  }
+
+  return NPP_STATION_MATCHERS.find((term) =>
+    term.variants.some((variant) => haystack.includes(variant))
+  )?.canonical;
+}
+
+function resolveSupplierKey(input: { supplier?: string; taxId?: string; ogrn?: string }) {
+  if (input.taxId?.trim()) {
+    return `inn:${input.taxId.trim()}`;
+  }
+
+  if (input.ogrn?.trim()) {
+    return `ogrn:${input.ogrn.trim()}`;
+  }
+
+  return `name:${normalizeSupplierName(input.supplier ?? "")}`;
+}
+
+function normalizeSupplierName(value: string) {
+  return value
+    .toLowerCase()
+    .replace(/[\"'`«»().,]/g, " ")
+    .replace(/\b(ооо|ао|пао|зао|ип|оао|нпо|фгуп|муп|гуп)\b/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
 }

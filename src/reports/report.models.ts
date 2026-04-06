@@ -1,4 +1,4 @@
-import { Field, ID, ObjectType, registerEnumType } from "@nestjs/graphql";
+import { Field, Float, ID, ObjectType, registerEnumType } from "@nestjs/graphql";
 import { ReportStatus } from "@prisma/client";
 import { AnalyticsDeadlineBucket, AnalyticsSourceHealthItem, AnalyticsSupplierExposureItem } from "../analytics/analytics.models";
 import { ProcurementItem } from "../procurement/models";
@@ -142,6 +142,126 @@ export class ReportSourceContributionItem {
 }
 
 @ObjectType()
+export class ReportSupplierDueDiligenceItem {
+  @Field()
+  supplier!: string;
+
+  @Field(() => String, { nullable: true })
+  taxId?: string;
+
+  @Field(() => String, { nullable: true })
+  ogrn?: string;
+
+  @Field()
+  procurementCount!: number;
+
+  @Field()
+  activeProcurements!: number;
+
+  @Field()
+  totalAmount!: number;
+
+  @Field(() => Date, { nullable: true })
+  lastProcurementAt?: Date | null;
+
+  @Field(() => String, { nullable: true })
+  companyStatus?: string;
+
+  @Field(() => Date, { nullable: true })
+  registrationDate?: Date | null;
+
+  @Field(() => String, { nullable: true })
+  region?: string;
+
+  @Field(() => String, { nullable: true })
+  okved?: string;
+
+  @Field(() => Boolean, { nullable: true })
+  liquidationMark?: boolean | null;
+
+  @Field()
+  riskSignalsCount!: number;
+
+  @Field()
+  activeRiskSignalsCount!: number;
+
+  @Field()
+  rnpEntriesCount!: number;
+
+  @Field()
+  activeRnpEntriesCount!: number;
+
+  @Field(() => Date, { nullable: true })
+  latestRiskAt?: Date | null;
+
+  @Field()
+  integrityScore!: number;
+
+  @Field(() => [String])
+  flags!: string[];
+}
+
+@ObjectType()
+export class ReportNppStationOrderEntry {
+  @Field(() => ID)
+  procurementId!: string;
+
+  @Field()
+  externalId!: string;
+
+  @Field()
+  title!: string;
+
+  @Field(() => String, { nullable: true })
+  customer?: string;
+
+  @Field(() => String, { nullable: true })
+  supplier?: string;
+
+  @Field()
+  source!: string;
+
+  @Field(() => Float, { nullable: true })
+  amount?: number | null;
+
+  @Field(() => String, { nullable: true })
+  currency?: string;
+
+  @Field()
+  status!: string;
+
+  @Field(() => Date, { nullable: true })
+  publishedAt?: Date | null;
+
+  @Field(() => String, { nullable: true })
+  sourceUrl?: string;
+}
+
+@ObjectType()
+export class ReportNppStationOrderItem {
+  @Field()
+  station!: string;
+
+  @Field()
+  procurementCount!: number;
+
+  @Field()
+  contractCount!: number;
+
+  @Field(() => Float)
+  totalAmount!: number;
+
+  @Field(() => Date, { nullable: true })
+  firstPublishedAt?: Date | null;
+
+  @Field(() => Date, { nullable: true })
+  lastPublishedAt?: Date | null;
+
+  @Field(() => [ReportNppStationOrderEntry])
+  orders!: ReportNppStationOrderEntry[];
+}
+
+@ObjectType()
 export class ReportDetail {
   @Field(() => ID)
   id!: string;
@@ -193,6 +313,12 @@ export class ReportDetail {
 
   @Field(() => [AnalyticsSupplierExposureItem])
   supplierExposure!: AnalyticsSupplierExposureItem[];
+
+  @Field(() => [ReportSupplierDueDiligenceItem])
+  supplierDueDiligence!: ReportSupplierDueDiligenceItem[];
+
+  @Field(() => [ReportNppStationOrderItem])
+  nppStationOrders!: ReportNppStationOrderItem[];
 
   @Field(() => [SourceRun])
   recentSourceRuns!: SourceRun[];
