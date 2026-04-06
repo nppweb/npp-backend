@@ -98,7 +98,7 @@ export class DashboardService {
       }),
       this.prisma.procurement.findMany({
         where: { deletedAt: null, source: { deletedAt: null } },
-        take: 5,
+        take: 10,
         orderBy: [{ updatedAt: "desc" }, { publishedAt: "desc" }, { createdAt: "desc" }],
         include: {
           source: true,

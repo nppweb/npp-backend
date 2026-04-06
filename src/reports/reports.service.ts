@@ -461,9 +461,11 @@ export class ReportsService implements OnModuleInit, OnModuleDestroy {
   }
 
   private hydrateStoredDetail(report: ReportRecord, snapshot: StoredReportSnapshot) {
+    const generatedAt = new Date(snapshot.generatedAt);
+
     return {
       ...this.toSummary(report),
-      generatedAt: new Date(snapshot.generatedAt),
+      generatedAt,
       metrics: snapshot.metrics,
       highlights: snapshot.highlights,
       scores: snapshot.scores,
@@ -502,8 +504,18 @@ export class ReportsService implements OnModuleInit, OnModuleDestroy {
         ...item,
         publishedAt: item.publishedAt ? new Date(item.publishedAt) : null,
         deadlineAt: item.deadlineAt ? new Date(item.deadlineAt) : null,
-        createdAt: item.createdAt ? new Date(item.createdAt) : undefined,
-        updatedAt: item.updatedAt ? new Date(item.updatedAt) : undefined
+        createdAt: item.createdAt
+          ? new Date(item.createdAt)
+          : item.publishedAt
+            ? new Date(item.publishedAt)
+            : generatedAt,
+        updatedAt: item.updatedAt
+          ? new Date(item.updatedAt)
+          : item.createdAt
+            ? new Date(item.createdAt)
+            : item.publishedAt
+              ? new Date(item.publishedAt)
+              : generatedAt
       }))
     };
   }
@@ -748,8 +760,8 @@ export class ReportsService implements OnModuleInit, OnModuleDestroy {
               publishedAt: order.publishedAt ?? undefined,
               deadlineAt: undefined,
               sourceUrl: order.sourceUrl ?? undefined,
-              createdAt: undefined,
-              updatedAt: undefined,
+              createdAt: order.publishedAt ?? generatedAt,
+              updatedAt: order.publishedAt ?? generatedAt,
               rawPayload: { sourceSpecificData: { targetStationName: station.station } }
             }))
           ).slice(0, 12)
