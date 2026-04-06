@@ -462,45 +462,63 @@ export class ReportsService implements OnModuleInit, OnModuleDestroy {
 
   private hydrateStoredDetail(report: ReportRecord, snapshot: StoredReportSnapshot) {
     const generatedAt = new Date(snapshot.generatedAt);
+    const metrics = Array.isArray(snapshot.metrics) ? snapshot.metrics : [];
+    const highlights = Array.isArray(snapshot.highlights) ? snapshot.highlights : [];
+    const scores = Array.isArray(snapshot.scores) ? snapshot.scores : [];
+    const actions = Array.isArray(snapshot.actions) ? snapshot.actions : [];
+    const deadlinePressure = Array.isArray(snapshot.deadlinePressure) ? snapshot.deadlinePressure : [];
+    const statusMix = Array.isArray(snapshot.statusMix) ? snapshot.statusMix : [];
+    const amountDistribution = Array.isArray(snapshot.amountDistribution) ? snapshot.amountDistribution : [];
+    const customerExposure = Array.isArray(snapshot.customerExposure) ? snapshot.customerExposure : [];
+    const sourceContribution = Array.isArray(snapshot.sourceContribution) ? snapshot.sourceContribution : [];
+    const sourceHealth = Array.isArray(snapshot.sourceHealth) ? snapshot.sourceHealth : [];
+    const supplierExposure = Array.isArray(snapshot.supplierExposure) ? snapshot.supplierExposure : [];
+    const supplierDueDiligence = Array.isArray(snapshot.supplierDueDiligence)
+      ? snapshot.supplierDueDiligence
+      : [];
+    const nppStationOrders = Array.isArray(snapshot.nppStationOrders) ? snapshot.nppStationOrders : [];
+    const recentSourceRuns = Array.isArray(snapshot.recentSourceRuns) ? snapshot.recentSourceRuns : [];
+    const recentProcurements = Array.isArray(snapshot.recentProcurements) ? snapshot.recentProcurements : [];
 
     return {
       ...this.toSummary(report),
       generatedAt,
-      metrics: snapshot.metrics,
-      highlights: snapshot.highlights,
-      scores: snapshot.scores,
-      actions: snapshot.actions,
-      deadlinePressure: snapshot.deadlinePressure,
-      statusMix: snapshot.statusMix,
-      amountDistribution: snapshot.amountDistribution,
-      customerExposure: snapshot.customerExposure,
-      sourceContribution: snapshot.sourceContribution,
-      sourceHealth: snapshot.sourceHealth.map((item) => ({
+      metrics,
+      highlights,
+      scores,
+      actions,
+      deadlinePressure,
+      statusMix,
+      amountDistribution,
+      customerExposure,
+      sourceContribution,
+      sourceHealth: sourceHealth.map((item) => ({
         ...item,
         lastRunAt: item.lastRunAt ? new Date(item.lastRunAt) : null
       })),
-      supplierExposure: snapshot.supplierExposure,
-      supplierDueDiligence: snapshot.supplierDueDiligence.map((item) => ({
+      supplierExposure,
+      supplierDueDiligence: supplierDueDiligence.map((item) => ({
         ...item,
         lastProcurementAt: item.lastProcurementAt ? new Date(item.lastProcurementAt) : null,
         registrationDate: item.registrationDate ? new Date(item.registrationDate) : null,
-        latestRiskAt: item.latestRiskAt ? new Date(item.latestRiskAt) : null
+        latestRiskAt: item.latestRiskAt ? new Date(item.latestRiskAt) : null,
+        flags: Array.isArray(item.flags) ? item.flags : []
       })),
-      nppStationOrders: snapshot.nppStationOrders.map((item) => ({
+      nppStationOrders: nppStationOrders.map((item) => ({
         ...item,
         firstPublishedAt: item.firstPublishedAt ? new Date(item.firstPublishedAt) : null,
         lastPublishedAt: item.lastPublishedAt ? new Date(item.lastPublishedAt) : null,
-        orders: item.orders.map((order) => ({
+        orders: (Array.isArray(item.orders) ? item.orders : []).map((order) => ({
           ...order,
           publishedAt: order.publishedAt ? new Date(order.publishedAt) : null
         }))
       })),
-      recentSourceRuns: snapshot.recentSourceRuns.map((item) => ({
+      recentSourceRuns: recentSourceRuns.map((item) => ({
         ...item,
         startedAt: new Date(item.startedAt),
         finishedAt: item.finishedAt ? new Date(item.finishedAt) : null
       })),
-      recentProcurements: snapshot.recentProcurements.map((item) => ({
+      recentProcurements: recentProcurements.map((item) => ({
         ...item,
         publishedAt: item.publishedAt ? new Date(item.publishedAt) : null,
         deadlineAt: item.deadlineAt ? new Date(item.deadlineAt) : null,
