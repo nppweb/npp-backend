@@ -75,7 +75,10 @@ export class ScraperAdminService {
         ) {
           attentionReason = lastRun.errorMessage || "Последний запуск завершился с ошибкой";
         } else if ((health?.riskLevel ?? "STABLE") !== "STABLE") {
-          attentionReason = "Источник отмечен как требующий внимания";
+          attentionReason =
+            (health?.failedRuns ?? 0) > 0
+              ? `${health?.failedRuns ?? 0} неуспешных или частичных запусков в недавнем окне при текущем успешном прогоне`
+              : "Источник отмечен как требующий внимания";
         }
 
         return {

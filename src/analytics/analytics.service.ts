@@ -216,6 +216,7 @@ export class AnalyticsService {
       const successRate = totalRuns > 0 ? (successCount / totalRuns) * 100 : 0;
       const sourcePublicationRate =
         sourceDiscovered > 0 ? (sourcePublished / sourceDiscovered) * 100 : 0;
+      const hasMeaningfulFailureHistory = failedRuns >= 2;
 
       let riskLevel = "STABLE";
 
@@ -229,7 +230,7 @@ export class AnalyticsService {
       } else if (
         lastRun.status === SourceRunStatus.PARTIAL ||
         (hoursSinceLastRun !== null && hoursSinceLastRun >= 24) ||
-        failedRuns > 0 ||
+        hasMeaningfulFailureHistory ||
         successRate < 80
       ) {
         riskLevel = "WATCH";
