@@ -158,41 +158,41 @@ type StoredReportSnapshot = {
 };
 
 const REPORT_TYPE_LABELS: Record<string, string> = {
-  "daily-overview": "Ежедневный обзор",
-  "supplier-risk": "Риски поставщиков",
-  "supplier-due-diligence": "Добросовестность поставщиков",
-  "npp-station-orders": "Закупки по АЭС",
-  "pipeline-incident": "Инциденты пайплайна"
+  "daily-overview": "Аналитическая сводка по закупкам",
+  "supplier-risk": "Риски и концентрация поставщиков",
+  "supplier-due-diligence": "Проверка благонадёжности поставщиков",
+  "npp-station-orders": "Закупочная активность АЭС",
+  "pipeline-incident": "Стабильность парсеров и публикации"
 };
 
 const REPORT_TEMPLATES: ReportDefinition[] = [
   {
     type: "daily-overview",
-    title: "Оперативная сводка по закупкам",
-    description: "Живой обзор объёма закупок, дедлайнов, публикаций и свежести данных.",
+    title: "Аналитическая сводка по закупкам",
+    description: "Сводный отчет по объёму закупок, срокам, публикациям и актуальности данных.",
     cadenceHours: 12
   },
   {
     type: "supplier-risk",
-    title: "Риски поставщиков и концентрация",
-    description: "Отчёт по концентрации, контрагентским сигналам и клиентской экспозиции.",
+    title: "Риски и концентрация поставщиков",
+    description: "Отчет по концентрации, контрагентским сигналам и закупкам, требующим внимания.",
     cadenceHours: 24
   },
   {
     type: "supplier-due-diligence",
-    title: "Добросовестность и благонадёжность поставщиков",
-    description: "Проверка поставщиков по ФНС, Федресурсу, РНП и закупочной активности.",
+    title: "Проверка благонадёжности поставщиков",
+    description: "Проверка поставщиков по ФНС, Федресурсу, РНП и собственной закупочной активности.",
     cadenceHours: 24
   },
   {
     type: "npp-station-orders",
-    title: "Что заказывали АЭС",
-    description: "Отдельный отчёт по каждой АЭС: какие закупки и договоры публиковались и когда.",
+    title: "Закупочная активность АЭС",
+    description: "Отчет по станциям: какие закупки и договоры публиковались, где и в какой период.",
     cadenceHours: 12
   },
   {
     type: "pipeline-incident",
-    title: "Надёжность парсеров и пайплайна",
+    title: "Стабильность парсеров и публикации",
     description: "Контроль проблемных запусков, потерь публикации и деградации источников.",
     cadenceHours: 6
   }
@@ -202,7 +202,7 @@ const ROLE_REPORT_TYPES: Record<UserRole, string[]> = {
   USER: [],
   ANALYST: ["daily-overview", "supplier-risk", "supplier-due-diligence", "npp-station-orders"],
   DEVELOPER: ["pipeline-incident"],
-  ADMIN: REPORT_TEMPLATES.map((item) => item.type)
+  ADMIN: ["daily-overview", "supplier-risk", "supplier-due-diligence", "npp-station-orders"]
 };
 
 const DAY_MS = 24 * 60 * 60 * 1000;
