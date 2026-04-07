@@ -208,7 +208,13 @@ const ROLE_REPORT_TYPES: Record<UserRole, string[]> = {
   USER: [],
   ANALYST: ["daily-overview", "supplier-risk", "supplier-due-diligence", "npp-station-orders"],
   DEVELOPER: ["pipeline-incident"],
-  ADMIN: ["daily-overview", "supplier-risk", "supplier-due-diligence", "npp-station-orders"]
+  ADMIN: [
+    "daily-overview",
+    "supplier-risk",
+    "supplier-due-diligence",
+    "npp-station-orders",
+    "pipeline-incident"
+  ]
 };
 
 const DAY_MS = 24 * 60 * 60 * 1000;
