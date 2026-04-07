@@ -1,8 +1,15 @@
 import { Injectable } from "@nestjs/common";
 import { ConfigService } from "@nestjs/config";
 import { ProcurementStatus } from "@prisma/client";
+import {
+  NPP_SOURCE_CODES,
+  resolveNppStationName,
+  withResolvedNppTargetStation
+} from "../common/npp-stations";
 import { PrismaService } from "../prisma/prisma.service";
 import { syncEnabledSourcesCatalog } from "../sources/source-catalog";
+
+const DAY_MS = 24 * 60 * 60 * 1000;
 
 @Injectable()
 export class DashboardService {
@@ -20,6 +27,7 @@ export class DashboardService {
     const last24Hours = new Date(Date.now() - 24 * 60 * 60 * 1000);
     const timelineWindowDays = 14;
     const timelineStart = new Date(Date.now() - (timelineWindowDays - 1) * 24 * 60 * 60 * 1000);
+    const nppWindowStart = new Date(Date.now() - 180 * DAY_MS);
 
     const [
       totalAuctions,
@@ -35,6 +43,7 @@ export class DashboardService {
       statusCounts,
       timelineRows,
       recentProcurements,
+      recentNppProcurements,
       recentSourceRuns
     ] = await Promise.all([
       this.prisma.auctionItem.count(),
@@ -105,6 +114,22 @@ export class DashboardService {
           supplier: true
         }
       }),
+      this.prisma.procurement.findMany({
+        where: {
+          deletedAt: null,
+          source: {
+            deletedAt: null,
+            code: { in: [...NPP_SOURCE_CODES] }
+          },
+          OR: [{ publishedAt: { gte: nppWindowStart } }, { createdAt: { gte: nppWindowStart } }]
+        },
+        take: 200,
+        orderBy: [{ publishedAt: "desc" }, { createdAt: "desc" }],
+        include: {
+          source: true,
+          supplier: true
+        }
+      }),
       this.prisma.sourceRun.findMany({
         where: { source: { deletedAt: null } },
         take: 5,
@@ -156,23 +181,13 @@ export class DashboardService {
       procurementsByStatus: this.toStatusStats(statusCounts),
       procurementsOverTime: this.buildTimeline(timelineRows, timelineStart, timelineWindowDays),
       recentProcurements: recentProcurements.map((item) => ({
-        id: item.id,
-        externalId: item.externalId,
-        source: item.source.code,
-        title: item.title,
-        description: item.description ?? undefined,
-        customer: item.customerName ?? undefined,
-        supplier: item.supplier?.name ?? undefined,
-        amount: item.amount,
-        currency: item.currency ?? undefined,
-        status: item.status,
-        publishedAt: item.publishedAt,
-        deadlineAt: item.deadlineAt,
-        sourceUrl: item.sourceUrl ?? undefined,
-        createdAt: item.createdAt,
-        updatedAt: item.updatedAt,
-        rawPayload: (item.rawPayload ?? undefined) as Record<string, unknown> | undefined
+        ...this.toProcurementGraphql(item)
       })),
+      recentNppProcurements: recentNppProcurements
+        .filter((item) => resolveNppStationName(item.rawPayload, [item.title, item.customerName]))
+        .map((item) => ({
+          ...this.toProcurementGraphql(item)
+        })),
       sourcesSummary,
       recentSourceRuns: recentSourceRuns.map((run) => ({
         ...run,
@@ -218,5 +233,45 @@ export class DashboardService {
         count: byDay.get(key) ?? 0
       };
     });
+  }
+
+  private toProcurementGraphql(item: {
+    id: string;
+    externalId: string;
+    title: string;
+    description: string | null;
+    customerName: string | null;
+    amount: number | null;
+    currency: string | null;
+    publishedAt: Date | null;
+    deadlineAt: Date | null;
+    status: ProcurementStatus;
+    sourceUrl: string | null;
+    createdAt: Date;
+    updatedAt: Date;
+    rawPayload: unknown;
+    source: { code: string };
+    supplier: { name: string } | null;
+  }) {
+    const targetStationName = resolveNppStationName(item.rawPayload, [item.title, item.customerName]);
+
+    return {
+      id: item.id,
+      externalId: item.externalId,
+      source: item.source.code,
+      title: item.title,
+      description: item.description ?? undefined,
+      customer: item.customerName ?? undefined,
+      supplier: item.supplier?.name ?? undefined,
+      amount: item.amount,
+      currency: item.currency ?? undefined,
+      status: item.status,
+      publishedAt: item.publishedAt,
+      deadlineAt: item.deadlineAt,
+      sourceUrl: item.sourceUrl ?? undefined,
+      createdAt: item.createdAt,
+      updatedAt: item.updatedAt,
+      rawPayload: withResolvedNppTargetStation(item.rawPayload, targetStationName)
+    };
   }
 }

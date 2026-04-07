@@ -8,6 +8,12 @@ import {
 } from "@nestjs/common";
 import { Prisma, ProcurementStatus, ReportStatus, SourceRunStatus, UserRole } from "@prisma/client";
 import { AnalyticsService } from "../analytics/analytics.service";
+import {
+  getSourceSpecificData,
+  NPP_SOURCE_CODES,
+  NPP_STATION_NAMES,
+  resolveNppStationName
+} from "../common/npp-stations";
 import { isMeaningfulSupplierName, normalizeSupplierName } from "../common/supplier-hygiene";
 import { DashboardService } from "../dashboard/dashboard.service";
 import { PrismaService } from "../prisma/prisma.service";
@@ -207,49 +213,6 @@ const ROLE_REPORT_TYPES: Record<UserRole, string[]> = {
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 const NPP_PERIOD_START = new Date("2025-01-01T00:00:00+03:00");
-const NPP_SOURCE_CODES = ["eis", "eis_contracts", "eis_contracts_223"] as const;
-const NPP_STATION_MATCHERS = [
-  {
-    canonical: "Балаковская атомная станция",
-    variants: ["балаковская атомная станция", "балаковская аэс", "балаковская аэс-авто"]
-  },
-  {
-    canonical: "Белоярская атомная станция",
-    variants: ["белоярская атомная станция", "белоярская аэс"]
-  },
-  {
-    canonical: "Билибинская атомная станция",
-    variants: ["билибинская атомная станция", "билибинская аэс"]
-  },
-  {
-    canonical: "Калининская атомная станция",
-    variants: ["калининская атомная станция", "калининская аэс", "калининская аэс-сервис"]
-  },
-  {
-    canonical: "Кольская атомная станция",
-    variants: ["кольская атомная станция", "кольская аэс"]
-  },
-  {
-    canonical: "Курская атомная станция",
-    variants: ["курская атомная станция", "курская аэс", "курская аэс-сервис"]
-  },
-  {
-    canonical: "Ленинградская атомная станция",
-    variants: ["ленинградская атомная станция", "ленинградская аэс", "ленинградская аэс-авто"]
-  },
-  {
-    canonical: "Нововоронежская атомная станция",
-    variants: ["нововоронежская атомная станция", "нововоронежская аэс"]
-  },
-  {
-    canonical: "Ростовская атомная станция",
-    variants: ["ростовская атомная станция", "ростовская аэс"]
-  },
-  {
-    canonical: "Смоленская атомная станция",
-    variants: ["смоленская атомная станция", "смоленская аэс", "смоленская аэс-сервис"]
-  }
-] as const;
 
 @Injectable()
 export class ReportsService implements OnModuleInit, OnModuleDestroy {
@@ -1698,7 +1661,7 @@ export class ReportsService implements OnModuleInit, OnModuleDestroy {
     >();
 
     for (const item of procurements) {
-      const station = resolveTargetStationName(item.rawPayload, item.title, item.customerName);
+      const station = resolveNppStationName(item.rawPayload, [item.title, item.customerName]);
 
       if (!station) {
         continue;
@@ -1783,7 +1746,7 @@ export class ReportsService implements OnModuleInit, OnModuleDestroy {
       },
       {
         label: "Покрытие станций",
-        value: this.formatPercent((items.length / NPP_STATION_MATCHERS.length) * 100),
+        value: this.formatPercent((items.length / NPP_STATION_NAMES.length) * 100),
         hint: "Сколько станций уже попало в атомный аналитический слой."
       }
     ];
@@ -1796,7 +1759,7 @@ export class ReportsService implements OnModuleInit, OnModuleDestroy {
     const latestStation = [...items].sort(
       (left, right) => (right.lastPublishedAt?.getTime() ?? 0) - (left.lastPublishedAt?.getTime() ?? 0)
     )[0];
-    const uncoveredStations = NPP_STATION_MATCHERS.length - items.length;
+    const uncoveredStations = NPP_STATION_NAMES.length - items.length;
 
     return [
       {
@@ -1842,9 +1805,9 @@ export class ReportsService implements OnModuleInit, OnModuleDestroy {
     return [
       {
         label: "Покрытие станций",
-        value: this.clampScore((items.length / NPP_STATION_MATCHERS.length) * 100),
+        value: this.clampScore((items.length / NPP_STATION_NAMES.length) * 100),
         detail: "Доля АЭС, по которым в системе уже есть закупочные записи.",
-        severity: items.length < NPP_STATION_MATCHERS.length / 2 ? "warning" : "success"
+        severity: items.length < NPP_STATION_NAMES.length / 2 ? "warning" : "success"
       },
       {
         label: "Заполненность сумм",
@@ -1871,9 +1834,7 @@ export class ReportsService implements OnModuleInit, OnModuleDestroy {
     items: Awaited<ReturnType<ReportsService["buildNppStationOrderItems"]>>
   ) {
     const actions = [];
-    const uncoveredStations = NPP_STATION_MATCHERS.filter(
-      (station) => !items.some((item) => item.station === station.canonical)
-    );
+    const uncoveredStations = NPP_STATION_NAMES.filter((station) => !items.some((item) => item.station === station));
     const staleStations = items.filter(
       (item) => (item.lastPublishedAt?.getTime() ?? 0) < Date.now() - 120 * DAY_MS
     );
@@ -1882,7 +1843,7 @@ export class ReportsService implements OnModuleInit, OnModuleDestroy {
     if (uncoveredStations.length > 0) {
       actions.push({
         title: "Расширить покрытие АЭС",
-        description: `Пока нет данных по станциям: ${uncoveredStations.map((item) => item.canonical).join(", ")}.`,
+        description: `Пока нет данных по станциям: ${uncoveredStations.join(", ")}.`,
         priority: "Высокий"
       });
     }
@@ -2192,51 +2153,9 @@ function isRegistryEntryActive(registryStatus: string | null, exclusionDate: Dat
   return exclusionDate.getTime() > Date.now();
 }
 
-function getSourceSpecificData(rawPayload: unknown) {
-  if (!rawPayload || typeof rawPayload !== "object" || Array.isArray(rawPayload)) {
-    return undefined;
-  }
-
-  const payload = rawPayload as Record<string, unknown>;
-  const candidate = payload.sourceSpecificData;
-
-  if (!candidate || typeof candidate !== "object" || Array.isArray(candidate)) {
-    return undefined;
-  }
-
-  return candidate as Record<string, unknown>;
-}
-
 function resolveSourceType(rawPayload: unknown): string | undefined {
   const sourceSpecificData = getSourceSpecificData(rawPayload);
   return typeof sourceSpecificData?.sourceType === "string" ? sourceSpecificData.sourceType : undefined;
-}
-
-function resolveTargetStationName(
-  rawPayload: unknown,
-  title: string,
-  customerName: string | null
-): string | undefined {
-  const sourceSpecificData = getSourceSpecificData(rawPayload);
-  const explicitStationName =
-    typeof sourceSpecificData?.targetStationName === "string" ? sourceSpecificData.targetStationName : undefined;
-
-  if (explicitStationName) {
-    return explicitStationName;
-  }
-
-  const haystack = [title, customerName]
-    .filter(Boolean)
-    .join(" ")
-    .toLowerCase();
-
-  if (!haystack) {
-    return undefined;
-  }
-
-  return NPP_STATION_MATCHERS.find((term) =>
-    term.variants.some((variant) => haystack.includes(variant))
-  )?.canonical;
 }
 
 function resolveSupplierKey(input: { supplier?: string; taxId?: string; ogrn?: string }) {

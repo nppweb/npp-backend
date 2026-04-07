@@ -9,6 +9,7 @@ import {
 } from "@prisma/client";
 import { createHash } from "node:crypto";
 import { AuditService } from "../audit/audit.service";
+import { resolveNppStationName, withResolvedNppTargetStation } from "../common/npp-stations";
 import type { RequestLike } from "../common/request-context";
 import { extractRequestContext } from "../common/request-context";
 import { cleanSupplierName, isMeaningfulSupplierName } from "../common/supplier-hygiene";
@@ -341,6 +342,8 @@ export class ProcurementService {
     source: { code: string };
     supplier: { name: string } | null;
   }): ProcurementItem {
+    const targetStationName = resolveNppStationName(item.rawPayload, [item.title, item.customerName]);
+
     return {
       id: item.id,
       externalId: item.externalId,
@@ -357,7 +360,7 @@ export class ProcurementService {
       sourceUrl: item.sourceUrl ?? undefined,
       createdAt: item.createdAt,
       updatedAt: item.updatedAt,
-      rawPayload: (item.rawPayload ?? undefined) as Record<string, unknown> | undefined
+      rawPayload: withResolvedNppTargetStation(item.rawPayload, targetStationName)
     };
   }
 }

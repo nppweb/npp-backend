@@ -50,9 +50,31 @@ describe("DashboardService", () => {
               supplier: { name: "Supplier One" }
             }
           ])
+          .mockResolvedValueOnce([
+            {
+              id: "proc-2",
+              externalId: "EXT-2",
+              title: "Работы для Ростовской АЭС",
+              description: null,
+              customerName: "АО Концерн Росэнергоатом",
+              amount: 450000,
+              currency: "RUB",
+              publishedAt: new Date("2026-03-28T10:15:00.000Z"),
+              deadlineAt: null,
+              status: "ACTIVE",
+              sourceUrl: "https://example.test/2",
+              createdAt: new Date("2026-03-28T10:16:00.000Z"),
+              updatedAt: new Date("2026-03-28T10:17:00.000Z"),
+              rawPayload: { seed: true },
+              source: { code: "eis_contracts_223" },
+              supplier: { name: "Supplier Two" }
+            }
+          ])
       },
       source: {
         count: vi.fn().mockResolvedValue(3),
+        upsert: vi.fn(),
+        updateMany: vi.fn(),
         findMany: vi.fn().mockResolvedValue([
           {
             code: "easuz",
@@ -109,6 +131,10 @@ describe("DashboardService", () => {
       get: vi.fn().mockReturnValue([])
     };
 
+    prisma.source.upsert.mockResolvedValue(undefined);
+    prisma.source.updateMany.mockResolvedValue({ count: 0 });
+    prisma.$transaction = vi.fn().mockImplementation(async (operations) => Promise.all(operations));
+
     const service = new DashboardService(prisma as never, configService as never);
 
     const summary = await service.summary();
@@ -132,6 +158,18 @@ describe("DashboardService", () => {
           id: "proc-1",
           source: "eis",
           supplier: "Supplier One"
+        })
+      ],
+      recentNppProcurements: [
+        expect.objectContaining({
+          id: "proc-2",
+          source: "eis_contracts_223",
+          rawPayload: {
+            seed: true,
+            sourceSpecificData: {
+              targetStationName: "Ростовская атомная станция"
+            }
+          }
         })
       ],
       sourcesSummary: [

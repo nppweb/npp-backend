@@ -89,6 +89,9 @@ export class DashboardSummary {
   @Field(() => [ProcurementItem])
   recentProcurements!: ProcurementItem[];
 
+  @Field(() => [ProcurementItem])
+  recentNppProcurements!: ProcurementItem[];
+
   @Field(() => [DashboardSourceSummaryItem])
   sourcesSummary!: DashboardSourceSummaryItem[];
 

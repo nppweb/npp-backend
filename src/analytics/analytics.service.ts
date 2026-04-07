@@ -1,54 +1,17 @@
 import { Injectable } from "@nestjs/common";
 import { ProcurementStatus, SourceRunStatus } from "@prisma/client";
+import {
+  getSourceSpecificData,
+  NPP_SOURCE_CODES,
+  resolveNppStationName,
+  withResolvedNppTargetStation
+} from "../common/npp-stations";
 import { cleanSupplierName, isMeaningfulSupplierName } from "../common/supplier-hygiene";
 import { PrismaService } from "../prisma/prisma.service";
 
 const HIGH_VALUE_THRESHOLD = 1_000_000;
 const DAY_MS = 24 * 60 * 60 * 1000;
 const NPP_PERIOD_START = new Date("2025-01-01T00:00:00+03:00");
-const NPP_SOURCE_CODES = ["eis", "eis_contracts", "eis_contracts_223"] as const;
-const NPP_STATION_MATCHERS = [
-  {
-    canonical: "Балаковская атомная станция",
-    variants: ["балаковская атомная станция", "балаковская аэс", "балаковская аэс-авто"]
-  },
-  {
-    canonical: "Белоярская атомная станция",
-    variants: ["белоярская атомная станция", "белоярская аэс"]
-  },
-  {
-    canonical: "Билибинская атомная станция",
-    variants: ["билибинская атомная станция", "билибинская аэс"]
-  },
-  {
-    canonical: "Калининская атомная станция",
-    variants: ["калининская атомная станция", "калининская аэс", "калининская аэс-сервис"]
-  },
-  {
-    canonical: "Кольская атомная станция",
-    variants: ["кольская атомная станция", "кольская аэс"]
-  },
-  {
-    canonical: "Курская атомная станция",
-    variants: ["курская атомная станция", "курская аэс", "курская аэс-сервис"]
-  },
-  {
-    canonical: "Ленинградская атомная станция",
-    variants: ["ленинградская атомная станция", "ленинградская аэс", "ленинградская аэс-авто"]
-  },
-  {
-    canonical: "Нововоронежская атомная станция",
-    variants: ["нововоронежская атомная станция", "нововоронежская аэс"]
-  },
-  {
-    canonical: "Ростовская атомная станция",
-    variants: ["ростовская атомная станция", "ростовская аэс"]
-  },
-  {
-    canonical: "Смоленская атомная станция",
-    variants: ["смоленская атомная станция", "смоленская аэс", "смоленская аэс-сервис"]
-  }
-] as const;
 
 @Injectable()
 export class AnalyticsService {
@@ -353,7 +316,7 @@ export class AnalyticsService {
     let nppContractCount = 0;
 
     for (const item of nppProcurements) {
-      const stationName = resolveTargetStationName(item.rawPayload, item.title, item.customerName);
+      const stationName = resolveNppStationName(item.rawPayload, [item.title, item.customerName]);
       const amount = item.amount ?? 0;
       const effectiveDate = item.publishedAt ?? item.createdAt;
       const sourceType = resolveSourceType(item.rawPayload);
@@ -510,38 +473,6 @@ function resolveSourceType(rawPayload: unknown): string | undefined {
   return typeof sourceSpecificData?.sourceType === "string" ? sourceSpecificData.sourceType : undefined;
 }
 
-function resolveTargetStationName(
-  rawPayload: unknown,
-  title: string,
-  customerName: string | null
-): string | undefined {
-  const sourceSpecificData = getSourceSpecificData(rawPayload);
-  const explicitStationName =
-    typeof sourceSpecificData?.targetStationName === "string" ? sourceSpecificData.targetStationName : undefined;
-
-  if (explicitStationName) {
-    return explicitStationName;
-  }
-
-  const haystack = [title, customerName ?? ""].join(" ").toLowerCase();
-  return NPP_STATION_MATCHERS.find((station) =>
-    station.variants.some((variant) => haystack.includes(variant))
-  )?.canonical;
-}
-
-function getSourceSpecificData(rawPayload: unknown): Record<string, unknown> | undefined {
-  if (!rawPayload || typeof rawPayload !== "object" || Array.isArray(rawPayload)) {
-    return undefined;
-  }
-
-  const candidate = (rawPayload as Record<string, unknown>).sourceSpecificData;
-  if (!candidate || typeof candidate !== "object" || Array.isArray(candidate)) {
-    return undefined;
-  }
-
-  return candidate as Record<string, unknown>;
-}
-
 function toProcurementGraphql(item: {
   id: string;
   externalId: string;
@@ -560,6 +491,8 @@ function toProcurementGraphql(item: {
   source: { code: string };
   supplier: { name: string } | null;
 }) {
+  const targetStationName = resolveNppStationName(item.rawPayload, [item.title, item.customerName]);
+
   return {
     id: item.id,
     externalId: item.externalId,
@@ -576,7 +509,7 @@ function toProcurementGraphql(item: {
     sourceUrl: item.sourceUrl ?? undefined,
     createdAt: item.createdAt,
     updatedAt: item.updatedAt,
-    rawPayload: (item.rawPayload ?? undefined) as Record<string, unknown> | undefined
+    rawPayload: withResolvedNppTargetStation(item.rawPayload, targetStationName)
   };
 }
 
