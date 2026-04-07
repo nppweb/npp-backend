@@ -11,6 +11,7 @@ import { createHash } from "node:crypto";
 import { AuditService } from "../audit/audit.service";
 import type { RequestLike } from "../common/request-context";
 import { extractRequestContext } from "../common/request-context";
+import { cleanSupplierName, isMeaningfulSupplierName } from "../common/supplier-hygiene";
 import { toJson, toNullableJson } from "../prisma/json";
 import { PrismaService } from "../prisma/prisma.service";
 import { getSourceCatalogItem } from "../sources/source-catalog";
@@ -238,14 +239,15 @@ export class ProcurementService {
         }
       }
 
+      const sanitizedSupplierName = cleanSupplierName(input.supplier);
       let supplierId: string | undefined;
-      if (input.supplier) {
+      if (sanitizedSupplierName && isMeaningfulSupplierName(sanitizedSupplierName)) {
         const supplier = await tx.supplier.upsert({
-          where: { normalizedName: input.supplier.toLowerCase() },
-          update: { name: input.supplier },
+          where: { normalizedName: sanitizedSupplierName.toLowerCase() },
+          update: { name: sanitizedSupplierName },
           create: {
-            name: input.supplier,
-            normalizedName: input.supplier.toLowerCase()
+            name: sanitizedSupplierName,
+            normalizedName: sanitizedSupplierName.toLowerCase()
           }
         });
         supplierId = supplier.id;

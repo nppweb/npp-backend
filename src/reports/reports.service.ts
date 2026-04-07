@@ -8,6 +8,7 @@ import {
 } from "@nestjs/common";
 import { Prisma, ProcurementStatus, ReportStatus, SourceRunStatus, UserRole } from "@prisma/client";
 import { AnalyticsService } from "../analytics/analytics.service";
+import { isMeaningfulSupplierName, normalizeSupplierName } from "../common/supplier-hygiene";
 import { DashboardService } from "../dashboard/dashboard.service";
 import { PrismaService } from "../prisma/prisma.service";
 
@@ -1342,6 +1343,10 @@ export class ReportsService implements OnModuleInit, OnModuleDestroy {
     >();
 
     for (const entry of registryEntries) {
+      if (!isMeaningfulSupplierName(entry.supplierName)) {
+        continue;
+      }
+
       const key = resolveSupplierKey({
         supplier: entry.supplierName,
         taxId: entry.supplierInn ?? undefined,
@@ -1358,6 +1363,7 @@ export class ReportsService implements OnModuleInit, OnModuleDestroy {
     const activeRiskThreshold = new Date(Date.now() - 180 * DAY_MS);
 
     const supplierItems = suppliers
+      .filter((supplier) => isMeaningfulSupplierName(supplier.name, supplier.metadata))
       .map((supplier) => {
         const key = resolveSupplierKey({
           supplier: supplier.name,
@@ -1461,6 +1467,10 @@ export class ReportsService implements OnModuleInit, OnModuleDestroy {
         ).length;
         const supplier = latest?.supplierName ?? "Поставщик без карточки";
 
+        if (!isMeaningfulSupplierName(supplier)) {
+          return null;
+        }
+
         return {
           supplier,
           taxId: latest?.supplierInn ?? undefined,
@@ -1496,7 +1506,8 @@ export class ReportsService implements OnModuleInit, OnModuleDestroy {
             procurementCount: 0
           })
         };
-      });
+      })
+      .filter((item): item is NonNullable<typeof item> => item !== null);
 
     return [...supplierItems, ...registryOnlyItems].sort(
       (left, right) =>
@@ -2238,13 +2249,4 @@ function resolveSupplierKey(input: { supplier?: string; taxId?: string; ogrn?: s
   }
 
   return `name:${normalizeSupplierName(input.supplier ?? "")}`;
-}
-
-function normalizeSupplierName(value: string) {
-  return value
-    .toLowerCase()
-    .replace(/[\"'`«»().,]/g, " ")
-    .replace(/\b(ооо|ао|пао|зао|ип|оао|нпо|фгуп|муп|гуп)\b/g, " ")
-    .replace(/\s+/g, " ")
-    .trim();
 }

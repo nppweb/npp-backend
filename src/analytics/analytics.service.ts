@@ -1,5 +1,6 @@
 import { Injectable } from "@nestjs/common";
 import { ProcurementStatus, SourceRunStatus } from "@prisma/client";
+import { cleanSupplierName, isMeaningfulSupplierName } from "../common/supplier-hygiene";
 import { PrismaService } from "../prisma/prisma.service";
 
 const HIGH_VALUE_THRESHOLD = 1_000_000;
@@ -190,7 +191,8 @@ export class AnalyticsService {
           amount: true,
           supplier: {
             select: {
-              name: true
+              name: true,
+              metadata: true
             }
           }
         }
@@ -296,9 +298,9 @@ export class AnalyticsService {
     >();
 
     for (const item of supplierProcurements) {
-      const supplierName = item.supplier?.name;
+      const supplierName = cleanSupplierName(item.supplier?.name);
 
-      if (!supplierName) {
+      if (!supplierName || !isMeaningfulSupplierName(supplierName, item.supplier?.metadata)) {
         continue;
       }
 
