@@ -11,6 +11,7 @@ import type {
 } from "./scraper-admin.models";
 
 const SCRAPER_CONFIG_KEY = "scraper.runtime.config";
+const RUNNING_ATTENTION_THRESHOLD_MS = 2 * 60 * 60 * 1000;
 
 type RuntimeConfigRecord = {
   schedule: string;
@@ -50,6 +51,7 @@ export class ScraperAdminService {
       config,
       runtime,
       sources: sources.map((source) => {
+        const now = Date.now();
         const health = analyticsBySource.get(source.code);
         const lastRun = source.runs[0];
         const lastSuccess = source.runs.find((item) => item.status === SourceRunStatus.SUCCESS);
@@ -58,15 +60,24 @@ export class ScraperAdminService {
         const circuitOpen = Boolean(
           circuitState?.openUntil && circuitState.openUntil.getTime() > Date.now()
         );
+        const hasStaleRunningStatus =
+          lastRun?.status === SourceRunStatus.RUNNING && !isRunning;
+        const runningTooLong = Boolean(
+          isRunning &&
+            lastRun?.startedAt &&
+            now - lastRun.startedAt.getTime() >= RUNNING_ATTENTION_THRESHOLD_MS
+        );
 
         let attentionReason = "Работает стабильно";
 
         if (!runtime.reachable) {
           attentionReason = "Контур управления scraper-service недоступен";
-        } else if (isRunning) {
-          attentionReason = "Источник сейчас выполняется";
         } else if (circuitOpen) {
           attentionReason = "Circuit breaker открыт после серии ошибок";
+        } else if (runningTooLong) {
+          attentionReason = "Источник выполняется дольше ожидаемого и похож на зависший прогон";
+        } else if (hasStaleRunningStatus) {
+          attentionReason = "В БД остался статус RUNNING, но scraper-service не подтверждает активный прогон";
         } else if (!lastRun) {
           attentionReason = "Запусков ещё не было";
         } else if (
@@ -79,6 +90,8 @@ export class ScraperAdminService {
             (health?.failedRuns ?? 0) > 0
               ? `${health?.failedRuns ?? 0} неуспешных или частичных запусков в недавнем окне при текущем успешном прогоне`
               : "Источник отмечен как требующий внимания";
+        } else if (isRunning) {
+          attentionReason = "Источник сейчас выполняется";
         }
 
         return {
@@ -102,7 +115,8 @@ export class ScraperAdminService {
             !runtime.reachable ||
             !source.isActive ||
             !lastRun ||
-            isRunning ||
+            runningTooLong ||
+            hasStaleRunningStatus ||
             circuitOpen ||
             lastRun.status === SourceRunStatus.FAILED ||
             lastRun.status === SourceRunStatus.PARTIAL ||
