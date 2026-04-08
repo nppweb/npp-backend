@@ -124,7 +124,8 @@ describe("DashboardService", () => {
             source: { code: "eis" }
           }
         ])
-      }
+      },
+      $transaction: vi.fn(async (operations: Array<Promise<unknown>>) => Promise.all(operations))
     };
 
     const configService = {
@@ -133,7 +134,6 @@ describe("DashboardService", () => {
 
     prisma.source.upsert.mockResolvedValue(undefined);
     prisma.source.updateMany.mockResolvedValue({ count: 0 });
-    prisma.$transaction = vi.fn().mockImplementation(async (operations) => Promise.all(operations));
 
     const service = new DashboardService(prisma as never, configService as never);
 
