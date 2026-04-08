@@ -10,7 +10,7 @@ permissions:
 
 jobs:
   deploy:
-    uses: nppweb/infra/.github/workflows/deploy.yml@main
+    uses: nppweb/infra/.github/workflows/deploy.yml@master
     with:
       repo_name: npp-backend
       branch: ${{ github.ref_name }}
