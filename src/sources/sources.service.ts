@@ -87,6 +87,31 @@ export class SourcesService {
     }));
   }
 
+  async listRunsPage(sourceCode?: string, limit = 20, offset = 0) {
+    const where = sourceCode
+      ? { source: { code: sourceCode, deletedAt: null } }
+      : { source: { deletedAt: null } };
+
+    const [total, runs] = await Promise.all([
+      this.prisma.sourceRun.count({ where }),
+      this.prisma.sourceRun.findMany({
+        where,
+        take: limit,
+        skip: offset,
+        orderBy: { startedAt: "desc" },
+        include: { source: true }
+      })
+    ]);
+
+    return {
+      total,
+      items: runs.map((run) => ({
+        ...run,
+        sourceCode: run.source.code
+      }))
+    };
+  }
+
   async triggerCollectors(sourceCodes?: string[]) {
     await syncEnabledSourcesCatalog(
       this.prisma,

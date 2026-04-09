@@ -989,12 +989,14 @@ export class ReportsService implements OnModuleInit, OnModuleDestroy {
   }
 
   private toSummary(report: ReportRecord, status = report.status, updatedAt = report.updatedAt) {
+    const reportType = this.getReportType(report);
+
     return {
       id: report.id,
       name: report.name,
       description: report.description ?? undefined,
-      status,
-      reportType: this.getReportType(report),
+      status: this.normalizeReadableReportStatus(reportType, status),
+      reportType,
       createdAt: report.createdAt,
       updatedAt
     };
@@ -1015,11 +1017,13 @@ export class ReportsService implements OnModuleInit, OnModuleDestroy {
     problematicRunsCount: number
   ) {
     if (reportType === "pipeline-incident") {
-      if (analytics.sourceHealth.length === 0) {
+      const hasPipelineData = analytics.sourceHealth.length > 0 || dashboard.recentSourceRuns.length > 0;
+
+      if (!hasPipelineData) {
         return ReportStatus.PENDING;
       }
 
-      return problematicRunsCount > 0 || analytics.atRiskSources > 0 ? ReportStatus.FAILED : ReportStatus.READY;
+      return ReportStatus.READY;
     }
 
     if (reportType === "supplier-risk") {
@@ -1041,6 +1045,14 @@ export class ReportsService implements OnModuleInit, OnModuleDestroy {
     }
 
     return dashboard.totalRecords > 0 || dashboard.totalProcurements > 0 ? ReportStatus.READY : ReportStatus.PENDING;
+  }
+
+  private normalizeReadableReportStatus(reportType: string, status: ReportStatus) {
+    if (reportType === "pipeline-incident" && status === ReportStatus.FAILED) {
+      return ReportStatus.READY;
+    }
+
+    return status;
   }
 
   private resolveReportGeneratedAt(

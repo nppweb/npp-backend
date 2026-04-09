@@ -38,6 +38,15 @@ export class SourceRun {
 }
 
 @ObjectType()
+export class SourceRunPage {
+  @Field(() => Int)
+  total!: number;
+
+  @Field(() => [SourceRun])
+  items!: SourceRun[];
+}
+
+@ObjectType()
 export class Source {
   @Field(() => ID)
   id!: string;
