@@ -272,46 +272,70 @@ const ROLE_REPORT_TYPES: Record<UserRole, string[]> = {
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 const NPP_PERIOD_START = new Date("2025-01-01T00:00:00+03:00");
+const NPP_UNCATEGORIZED_NICHE = "Прочее";
+const NPP_NICHE_ORDER = [
+  "Автотранспорт, спецтехника и ГСМ",
+  "Строительно-монтажные работы и инфраструктура",
+  "Безопасность, пожарная защита и СИЗ",
+  "Электротехника, КИП и измерения",
+  "ИТ, связь и оргтехника",
+  "Промышленное оборудование и комплектующие",
+  "Хозяйственное, бытовое и складское обеспечение",
+  "Лабораторный контроль, экология и экспертиза",
+  "Персонал, медицина и обучение",
+  "Проектирование и документация",
+  NPP_UNCATEGORIZED_NICHE
+] as const;
 const NPP_NICHE_RULES = [
   {
-    niche: "ИТ и цифровая инфраструктура",
+    niche: "Автотранспорт, спецтехника и ГСМ",
     pattern:
-      /\b(сервер|схд|ноутбук|компьютер|программ|по\b|лиценз|цифров|информац|сеть|сетев|телеком|связ|кибер|автоматиз|аналитическ|асу|база данных|видеоконференц)\b/i
+      /\b(автотранспорт|автомобил|автобус|легков(?:ым|ого)?\s+транспорт|транспортн(?:ых|ого)?\s+средств|пассажир(?:ов|ские)?|king long|higer|лиаз|ретардер|газонокос|бензин|гсм|мочевин|карбамид|автохими|автокосмет|уровн(?:я|е)\s+топлив|коробк(?:и)?\s+переключения\s+передач|перевозк)\b/i
   },
   {
-    niche: "Строительство и монтаж",
+    niche: "Безопасность, пожарная защита и СИЗ",
     pattern:
-      /\b(строит|монтаж|демонтаж|реконструкц|капитальн|проектн|пусконалад|инженерн|общестроит)\b/i
+      /\b(безопасн|пожар|противопожар|ограждени|егоза|видеонаблюден|сигнализац|скуд|соуэ|сиз|пропуск)\b/i
   },
   {
-    niche: "Ремонт и обслуживание",
+    niche: "ИТ, связь и оргтехника",
     pattern:
-      /\b(ремонт|обслужив|сервис|наладк|диагност|испытан|модернизац|техподдержк|сопровожден|запчаст)\b/i
+      /\b(информационн(?:ых|ые)?\s+систем|еос|закупки\s+2\s*0|оргтехник|офисн(?:ой|ая)?\s+техник|телекоммуникацион|сервер|схд|компьютер|ноутбук|программ|по\b|лиценз|цифров|телеком|связ)\b/i
   },
   {
-    niche: "Электротехника и КИП",
+    niche: "Электротехника, КИП и измерения",
     pattern:
-      /\b(электро|кабель|трансформатор|щит|релей|кип|автоматик|датчик|электродвигател|генератор)\b/i
+      /\b(электроизмерен|электротовар|электроинструмент|электро|кип|датчик|контроллер|трансформатор|щит|релей|кабель|генератор)\b/i
   },
   {
-    niche: "Безопасность и охрана",
+    niche: "Лабораторный контроль, экология и экспертиза",
     pattern:
-      /\b(охрана|безопасн|пожар|сигнализац|скуд|видеонаблюден|соуэ|радиац|эколог|сиз|пропуск)\b/i
+      /\b(лаборатор|исследован|производственн(?:ого)?\s+контрол|обследован|техническ(?:ого)?\s+состояни|экспертиз|утилизац|обезвреживан|отход(?:ов|ы)?|эколог)\b/i
   },
   {
-    niche: "Логистика и транспорт",
+    niche: "Персонал, медицина и обучение",
     pattern:
-      /\b(транспорт|доставк|логист|перевозк|склад|погруз|спецтехник|автотранспорт|аренда техник)\b/i
+      /\b(обучен|повышен(?:ия)?\s+квалификац|дпо|академи[яи]|медицинск|страхован|дмс)\b/i
   },
   {
-    niche: "Материалы и оборудование",
+    niche: "Хозяйственное, бытовое и складское обеспечение",
     pattern:
-      /\b(поставка|оборудован|материал|комплектующ|арматур|труб|металл|насос|компрессор|инструмент)\b/i
+      /\b(бытов(?:ой|ая)\s+техник|кухонн|посуд|инвентар|овощ|фрукт|ягод|текстиль|форменн(?:ой)?\s+одежд|спецодежд|прачеч|сантехническ|канцеляр|мебел|контейнер|расходн(?:ых)?\s+материал(?:ов)?\s+для\s+оргтехники|хоз(?:товар|инвент))\b/i
   },
   {
-    niche: "Услуги и экспертиза",
+    niche: "Промышленное оборудование и комплектующие",
     pattern:
-      /\b(услуг|обучен|аудит|экспертиз|исследован|лаборатор|консалт|страхован|аттестаци)\b/i
+      /\b(оборудован|комплектующ|компрессор|фильтр|ворот|двер(?:ей|и)|холодильн|теплов(?:ого)?\s+оборудован|моечн(?:ой)?\s+машин|манекен|сантехническ(?:их)?\s+издели)\b/i
+  },
+  {
+    niche: "Строительно-монтажные работы и инфраструктура",
+    pattern:
+      /\b(строит|монтаж|демонтаж|реконструкц|капитальн|текущ(?:ему)?\s+ремонт|ремонт\s+объект|пусконалад|металлоконструкц|лестниц|строительно монтажн|подъемн(?:ых)?\s+ворот)\b/i
+  },
+  {
+    niche: "Проектирование и документация",
+    pattern:
+      /\b(проектир|проектн|изыскан|смет|документац|чертеж|паспорт|техническ(?:ое|ий)\s+задан|обоснован)\b/i
   }
 ] as const;
 
@@ -875,6 +899,11 @@ export class ReportsService implements OnModuleInit, OnModuleDestroy {
                   }
                 }
               }))
+            )
+            .sort(
+              (left, right) =>
+                (right.publishedAt?.getTime() ?? right.createdAt.getTime()) -
+                (left.publishedAt?.getTime() ?? left.createdAt.getTime())
             )
             .slice(0, 12)
         };
@@ -2040,6 +2069,7 @@ export class ReportsService implements OnModuleInit, OnModuleDestroy {
       }))
       .sort(
         (left, right) =>
+          getNppNicheRank(left.niche) - getNppNicheRank(right.niche) ||
           right.procurementCount - left.procurementCount ||
           right.totalAmount - left.totalAmount ||
           left.niche.localeCompare(right.niche)
@@ -2226,7 +2256,7 @@ export class ReportsService implements OnModuleInit, OnModuleDestroy {
   private buildNppNicheOrderHighlights(
     items: Awaited<ReturnType<ReportsService["buildNppNicheOrderItems"]>>
   ) {
-    const topNiche = items[0];
+    const topNiche = selectTopNppNicheByProcurementCount(items);
     const mostExpensiveNiche = [...items].sort((left, right) => right.totalAmount - left.totalAmount)[0];
     const widestNiche = [...items].sort((left, right) => right.stationCount - left.stationCount)[0];
 
@@ -2266,7 +2296,8 @@ export class ReportsService implements OnModuleInit, OnModuleDestroy {
     const filledAmounts = items
       .flatMap((item) => item.orders)
       .filter((order) => typeof order.amount === "number").length;
-    const topNicheShare = items[0] ? (items[0].procurementCount / procurementCount) * 100 : 0;
+    const topNiche = selectTopNppNicheByProcurementCount(items);
+    const topNicheShare = topNiche ? (topNiche.procurementCount / procurementCount) * 100 : 0;
     const averageStationsPerNiche =
       items.length > 0
         ? items.reduce((sum, item) => sum + item.stationCount, 0) / items.length
@@ -2308,9 +2339,9 @@ export class ReportsService implements OnModuleInit, OnModuleDestroy {
       items.reduce((sum, item) => sum + item.procurementCount, 0),
       1
     );
-    const topNiche = items[0];
+    const topNiche = selectTopNppNicheByProcurementCount(items);
     const narrowNiches = items.filter((item) => item.stationCount === 1);
-    const uncategorized = items.find((item) => item.niche === "Прочее");
+    const uncategorized = items.find((item) => item.niche === NPP_UNCATEGORIZED_NICHE);
 
     if (topNiche && (topNiche.procurementCount / procurementCount) * 100 >= 35) {
       actions.push({
@@ -2640,10 +2671,27 @@ function resolveNppProcurementNiche(values: ReadonlyArray<string | null | undefi
     .trim();
 
   if (!normalized) {
-    return "Прочее";
+    return NPP_UNCATEGORIZED_NICHE;
   }
 
-  return NPP_NICHE_RULES.find((rule) => rule.pattern.test(normalized))?.niche ?? "Прочее";
+  return NPP_NICHE_RULES.find((rule) => rule.pattern.test(normalized))?.niche ?? NPP_UNCATEGORIZED_NICHE;
+}
+
+function getNppNicheRank(niche: string) {
+  const index = NPP_NICHE_ORDER.indexOf(niche as (typeof NPP_NICHE_ORDER)[number]);
+  return index === -1 ? NPP_NICHE_ORDER.length : index;
+}
+
+function selectTopNppNicheByProcurementCount<
+  T extends { niche: string; procurementCount: number; totalAmount: number; stationCount: number }
+>(items: ReadonlyArray<T>) {
+  return [...items].sort(
+    (left, right) =>
+      right.procurementCount - left.procurementCount ||
+      right.totalAmount - left.totalAmount ||
+      right.stationCount - left.stationCount ||
+      left.niche.localeCompare(right.niche)
+  )[0];
 }
 
 function resolveSupplierKey(input: { supplier?: string; taxId?: string; ogrn?: string }) {
