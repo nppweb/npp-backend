@@ -27,6 +27,45 @@ export class AnalyticsSupplierExposureItem {
 }
 
 @ObjectType()
+export class AnalyticsCustomerExposureItem {
+  @Field()
+  customer!: string;
+
+  @Field(() => Int)
+  procurementCount!: number;
+
+  @Field(() => Float)
+  totalAmount!: number;
+
+  @Field(() => Float)
+  sharePercent!: number;
+}
+
+@ObjectType()
+export class AnalyticsSupplierRiskWatchItem {
+  @Field()
+  supplier!: string;
+
+  @Field(() => String, { nullable: true })
+  taxId?: string;
+
+  @Field(() => String, { nullable: true })
+  ogrn?: string;
+
+  @Field(() => Int)
+  riskSignalsCount!: number;
+
+  @Field(() => Int)
+  activeRiskSignalsCount!: number;
+
+  @Field(() => Int)
+  activeProcurements!: number;
+
+  @Field(() => Date, { nullable: true })
+  latestRiskAt?: Date | null;
+}
+
+@ObjectType()
 export class AnalyticsNppTimelineItem {
   @Field()
   label!: string;
@@ -162,6 +201,12 @@ export class AnalyticsSummary {
 
   @Field(() => [AnalyticsSupplierExposureItem])
   supplierExposure!: AnalyticsSupplierExposureItem[];
+
+  @Field(() => [AnalyticsCustomerExposureItem])
+  customerExposure!: AnalyticsCustomerExposureItem[];
+
+  @Field(() => [AnalyticsSupplierRiskWatchItem])
+  supplierRiskWatchlist!: AnalyticsSupplierRiskWatchItem[];
 
   @Field(() => [AnalyticsNppTimelineItem])
   nppMonthlyDynamics!: AnalyticsNppTimelineItem[];

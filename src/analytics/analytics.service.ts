@@ -35,8 +35,10 @@ export class AnalyticsService {
       recentRuns,
       sources,
       supplierProcurements,
+      customerProcurements,
       attentionProcurements,
-      nppProcurements
+      nppProcurements,
+      riskySuppliers
     ] = await Promise.all([
       this.prisma.procurement.count({
         where: {
@@ -164,6 +166,20 @@ export class AnalyticsService {
         where: {
           deletedAt: null,
           source: { deletedAt: null },
+          customerName: {
+            not: null
+          },
+          OR: [{ publishedAt: { gte: last90Days } }, { createdAt: { gte: last90Days } }]
+        },
+        select: {
+          amount: true,
+          customerName: true
+        }
+      }),
+      this.prisma.procurement.findMany({
+        where: {
+          deletedAt: null,
+          source: { deletedAt: null },
           status: ProcurementStatus.ACTIVE,
           deadlineAt: {
             not: null,
@@ -191,6 +207,40 @@ export class AnalyticsService {
         include: {
           source: true,
           supplier: true
+        }
+      }),
+      this.prisma.supplier.findMany({
+        where: {
+          deletedAt: null,
+          riskSignals: {
+            some: {
+              deletedAt: null
+            }
+          }
+        },
+        select: {
+          name: true,
+          taxId: true,
+          ogrn: true,
+          procurements: {
+            where: {
+              deletedAt: null,
+              source: { deletedAt: null }
+            },
+            select: {
+              status: true
+            }
+          },
+          riskSignals: {
+            where: {
+              deletedAt: null
+            },
+            select: {
+              publishedAt: true,
+              eventDate: true,
+              createdAt: true
+            }
+          }
         }
       })
     ]);
@@ -293,6 +343,85 @@ export class AnalyticsService {
       }))
       .sort((left, right) => right.procurementCount - left.procurementCount)
       .slice(0, 5);
+
+    const customerStats = new Map<
+      string,
+      {
+        procurementCount: number;
+        totalAmount: number;
+      }
+    >();
+
+    for (const item of customerProcurements) {
+      const customerName = item.customerName?.trim();
+
+      if (!customerName) {
+        continue;
+      }
+
+      const current = customerStats.get(customerName) ?? {
+        procurementCount: 0,
+        totalAmount: 0
+      };
+
+      current.procurementCount += 1;
+      current.totalAmount += item.amount ?? 0;
+      customerStats.set(customerName, current);
+    }
+
+    const customerTotalCount = Array.from(customerStats.values()).reduce(
+      (sum, item) => sum + item.procurementCount,
+      0
+    );
+
+    const customerExposure = Array.from(customerStats.entries())
+      .map(([customer, stats]) => ({
+        customer,
+        procurementCount: stats.procurementCount,
+        totalAmount: stats.totalAmount,
+        sharePercent:
+          customerTotalCount > 0 ? roundMetric((stats.procurementCount / customerTotalCount) * 100) : 0
+      }))
+      .sort((left, right) => right.procurementCount - left.procurementCount || left.customer.localeCompare(right.customer))
+      .slice(0, 6);
+
+    const activeRiskThreshold = new Date(now.getTime() - 180 * DAY_MS);
+
+    const supplierRiskWatchlist = riskySuppliers
+      .map((supplier) => {
+        const latestRiskAt = supplier.riskSignals.reduce<Date | null>((latest, item) => {
+          const candidate = item.eventDate ?? item.publishedAt ?? item.createdAt;
+
+          if (!latest || candidate.getTime() > latest.getTime()) {
+            return candidate;
+          }
+
+          return latest;
+        }, null);
+
+        const activeRiskSignalsCount = supplier.riskSignals.filter((item) => {
+          const candidate = item.eventDate ?? item.publishedAt ?? item.createdAt;
+          return candidate.getTime() >= activeRiskThreshold.getTime();
+        }).length;
+
+        return {
+          supplier: supplier.name,
+          taxId: supplier.taxId ?? null,
+          ogrn: supplier.ogrn ?? null,
+          riskSignalsCount: supplier.riskSignals.length,
+          activeRiskSignalsCount,
+          activeProcurements: supplier.procurements.filter((item) => item.status === ProcurementStatus.ACTIVE).length,
+          latestRiskAt
+        };
+      })
+      .sort(
+        (left, right) =>
+          right.activeRiskSignalsCount - left.activeRiskSignalsCount ||
+          right.riskSignalsCount - left.riskSignalsCount ||
+          right.activeProcurements - left.activeProcurements ||
+          left.supplier.localeCompare(right.supplier)
+      )
+      .slice(0, 6);
 
     const deadlinePressure = [
       {
@@ -439,6 +568,8 @@ export class AnalyticsService {
         );
       }),
       supplierExposure,
+      customerExposure,
+      supplierRiskWatchlist,
       nppMonthlyDynamics,
       nppStationCoverage,
       nppSourceCoverage,
