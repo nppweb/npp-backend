@@ -69,6 +69,38 @@ export class UpdateUserRoleInput {
 }
 
 @InputType()
+export class UpdateUserInput {
+  @Field(() => ID)
+  @IsString()
+  @MinLength(1)
+  userId!: string;
+
+  @Field()
+  @IsEmail()
+  email!: string;
+
+  @Field()
+  @IsString()
+  @MinLength(3)
+  fullName!: string;
+
+  @Field(() => String, { nullable: true })
+  @IsOptional()
+  @IsString()
+  avatarUrl?: string | null;
+
+  @Field(() => UserRole)
+  @IsEnum(UserRole)
+  role!: UserRole;
+
+  @Field(() => String, { nullable: true })
+  @IsOptional()
+  @IsString()
+  @MinLength(5)
+  newPassword?: string | null;
+}
+
+@InputType()
 export class SetUserActiveInput {
   @Field(() => ID)
   @IsString()

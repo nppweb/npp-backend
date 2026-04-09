@@ -8,6 +8,7 @@ import {
   ResetUserPasswordInput,
   SetUserActiveInput,
   UpdateProfileInput,
+  UpdateUserInput,
   UpdateUserRoleInput,
   User
 } from "./user.models";
@@ -48,6 +49,16 @@ export class UsersResolver {
 
   @Roles(UserRole.ADMIN)
   @Mutation(() => User)
+  updateUser(
+    @Args("input") input: UpdateUserInput,
+    @CurrentUser() actor: AuthenticatedUser,
+    @Context() context: { req?: { headers: Record<string, string | string[] | undefined>; ip?: string } }
+  ) {
+    return this.usersService.updateUser(input.userId, input, actor, context.req);
+  }
+
+  @Roles(UserRole.ADMIN)
+  @Mutation(() => User)
   updateUserRole(
     @Args("input") input: UpdateUserRoleInput,
     @CurrentUser() actor: AuthenticatedUser,
@@ -64,6 +75,16 @@ export class UsersResolver {
     @Context() context: { req?: { headers: Record<string, string | string[] | undefined>; ip?: string } }
   ) {
     return this.usersService.deactivateUser(userId, actor, context.req);
+  }
+
+  @Roles(UserRole.ADMIN)
+  @Mutation(() => Boolean)
+  deleteUser(
+    @Args("userId") userId: string,
+    @CurrentUser() actor: AuthenticatedUser,
+    @Context() context: { req?: { headers: Record<string, string | string[] | undefined>; ip?: string } }
+  ) {
+    return this.usersService.deleteUser(userId, actor, context.req);
   }
 
   @Roles(UserRole.ADMIN)

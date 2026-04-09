@@ -64,6 +64,23 @@ type ReportDefinition = {
   cadenceHours: number;
 };
 
+type NppProcurementEntry = {
+  procurementId: string;
+  externalId: string;
+  title: string;
+  description?: string;
+  station: string;
+  customer?: string;
+  supplier?: string;
+  source: string;
+  amount?: number | null;
+  currency?: string | null;
+  status: ProcurementStatus;
+  publishedAt: Date;
+  sourceUrl?: string | null;
+  sourceType?: string;
+};
+
 type StoredReportSnapshot = {
   generatedAt: string;
   metrics: ReturnType<ReportsService["buildDailyOverviewMetrics"]>;
@@ -131,6 +148,28 @@ type StoredReportSnapshot = {
       sourceUrl?: string | null;
     }>;
   }>;
+  nppNicheOrders: Array<{
+    niche: string;
+    procurementCount: number;
+    stationCount: number;
+    totalAmount: number;
+    lastPublishedAt?: string | null;
+    stations: string[];
+    orders: Array<{
+      procurementId: string;
+      externalId: string;
+      title: string;
+      station: string;
+      customer?: string | null;
+      supplier?: string | null;
+      source: string;
+      amount?: number | null;
+      currency?: string | null;
+      status: string;
+      publishedAt?: string | null;
+      sourceUrl?: string | null;
+    }>;
+  }>;
   recentSourceRuns: Array<{
     id: string;
     runKey: string;
@@ -167,6 +206,7 @@ const REPORT_TYPE_LABELS: Record<string, string> = {
   "daily-overview": "Аналитическая сводка по закупкам",
   "supplier-risk": "Риски и концентрация поставщиков",
   "supplier-due-diligence": "Проверка благонадёжности поставщиков",
+  "npp-market-niches": "Ниши закупок АЭС",
   "npp-station-orders": "Закупочная активность АЭС",
   "pipeline-incident": "Стабильность парсеров и публикации"
 };
@@ -191,6 +231,12 @@ const REPORT_TEMPLATES: ReportDefinition[] = [
     cadenceHours: 24
   },
   {
+    type: "npp-market-niches",
+    title: "Ниши закупок АЭС",
+    description: "Отчет по нишам закупок атомных станций: какие категории закупаются чаще всего и в каком объеме.",
+    cadenceHours: 12
+  },
+  {
     type: "npp-station-orders",
     title: "Закупочная активность АЭС",
     description: "Отчет по станциям: какие закупки и договоры публиковались, где и в какой период.",
@@ -206,12 +252,19 @@ const REPORT_TEMPLATES: ReportDefinition[] = [
 
 const ROLE_REPORT_TYPES: Record<UserRole, string[]> = {
   USER: [],
-  ANALYST: ["daily-overview", "supplier-risk", "supplier-due-diligence", "npp-station-orders"],
+  ANALYST: [
+    "daily-overview",
+    "supplier-risk",
+    "supplier-due-diligence",
+    "npp-market-niches",
+    "npp-station-orders"
+  ],
   DEVELOPER: ["pipeline-incident"],
   ADMIN: [
     "daily-overview",
     "supplier-risk",
     "supplier-due-diligence",
+    "npp-market-niches",
     "npp-station-orders",
     "pipeline-incident"
   ]
@@ -219,6 +272,48 @@ const ROLE_REPORT_TYPES: Record<UserRole, string[]> = {
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 const NPP_PERIOD_START = new Date("2025-01-01T00:00:00+03:00");
+const NPP_NICHE_RULES = [
+  {
+    niche: "ИТ и цифровая инфраструктура",
+    pattern:
+      /\b(сервер|схд|ноутбук|компьютер|программ|по\b|лиценз|цифров|информац|сеть|сетев|телеком|связ|кибер|автоматиз|аналитическ|асу|база данных|видеоконференц)\b/i
+  },
+  {
+    niche: "Строительство и монтаж",
+    pattern:
+      /\b(строит|монтаж|демонтаж|реконструкц|капитальн|проектн|пусконалад|инженерн|общестроит)\b/i
+  },
+  {
+    niche: "Ремонт и обслуживание",
+    pattern:
+      /\b(ремонт|обслужив|сервис|наладк|диагност|испытан|модернизац|техподдержк|сопровожден|запчаст)\b/i
+  },
+  {
+    niche: "Электротехника и КИП",
+    pattern:
+      /\b(электро|кабель|трансформатор|щит|релей|кип|автоматик|датчик|электродвигател|генератор)\b/i
+  },
+  {
+    niche: "Безопасность и охрана",
+    pattern:
+      /\b(охрана|безопасн|пожар|сигнализац|скуд|видеонаблюден|соуэ|радиац|эколог|сиз|пропуск)\b/i
+  },
+  {
+    niche: "Логистика и транспорт",
+    pattern:
+      /\b(транспорт|доставк|логист|перевозк|склад|погруз|спецтехник|автотранспорт|аренда техник)\b/i
+  },
+  {
+    niche: "Материалы и оборудование",
+    pattern:
+      /\b(поставка|оборудован|материал|комплектующ|арматур|труб|металл|насос|компрессор|инструмент)\b/i
+  },
+  {
+    niche: "Услуги и экспертиза",
+    pattern:
+      /\b(услуг|обучен|аудит|экспертиз|исследован|лаборатор|консалт|страхован|аттестаци)\b/i
+  }
+] as const;
 
 @Injectable()
 export class ReportsService implements OnModuleInit, OnModuleDestroy {
@@ -447,6 +542,7 @@ export class ReportsService implements OnModuleInit, OnModuleDestroy {
       ? snapshot.supplierDueDiligence
       : [];
     const nppStationOrders = Array.isArray(snapshot.nppStationOrders) ? snapshot.nppStationOrders : [];
+    const nppNicheOrders = Array.isArray(snapshot.nppNicheOrders) ? snapshot.nppNicheOrders : [];
     const recentSourceRuns = Array.isArray(snapshot.recentSourceRuns) ? snapshot.recentSourceRuns : [];
     const recentProcurements = Array.isArray(snapshot.recentProcurements) ? snapshot.recentProcurements : [];
 
@@ -478,6 +574,15 @@ export class ReportsService implements OnModuleInit, OnModuleDestroy {
         ...item,
         firstPublishedAt: item.firstPublishedAt ? new Date(item.firstPublishedAt) : null,
         lastPublishedAt: item.lastPublishedAt ? new Date(item.lastPublishedAt) : null,
+        orders: (Array.isArray(item.orders) ? item.orders : []).map((order) => ({
+          ...order,
+          publishedAt: order.publishedAt ? new Date(order.publishedAt) : null
+        }))
+      })),
+      nppNicheOrders: nppNicheOrders.map((item) => ({
+        ...item,
+        lastPublishedAt: item.lastPublishedAt ? new Date(item.lastPublishedAt) : null,
+        stations: Array.isArray(item.stations) ? item.stations : [],
         orders: (Array.isArray(item.orders) ? item.orders : []).map((order) => ({
           ...order,
           publishedAt: order.publishedAt ? new Date(order.publishedAt) : null
@@ -542,6 +647,14 @@ export class ReportsService implements OnModuleInit, OnModuleDestroy {
           publishedAt: order.publishedAt ? order.publishedAt.toISOString() : null
         }))
       })),
+      nppNicheOrders: detail.nppNicheOrders.map((item) => ({
+        ...item,
+        lastPublishedAt: item.lastPublishedAt ? item.lastPublishedAt.toISOString() : null,
+        orders: item.orders.map((order) => ({
+          ...order,
+          publishedAt: order.publishedAt ? order.publishedAt.toISOString() : null
+        }))
+      })),
       recentSourceRuns: detail.recentSourceRuns.map((item) => ({
         ...item,
         startedAt: item.startedAt.toISOString(),
@@ -576,6 +689,7 @@ export class ReportsService implements OnModuleInit, OnModuleDestroy {
       supplierExposure: liveDetail.supplierExposure,
       supplierDueDiligence: liveDetail.supplierDueDiligence,
       nppStationOrders: liveDetail.nppStationOrders,
+      nppNicheOrders: liveDetail.nppNicheOrders,
       recentSourceRuns: liveDetail.recentSourceRuns,
       recentProcurements: liveDetail.recentProcurements
     };
@@ -667,6 +781,7 @@ export class ReportsService implements OnModuleInit, OnModuleDestroy {
           supplierExposure: analytics.supplierExposure,
           supplierDueDiligence: [],
           nppStationOrders: [],
+          nppNicheOrders: [],
           recentSourceRuns: recentProblematicRuns,
           recentProcurements: this.selectLargestProcurements(analytics.attentionProcurements)
         };
@@ -689,8 +804,79 @@ export class ReportsService implements OnModuleInit, OnModuleDestroy {
           supplierExposure: analytics.supplierExposure,
           supplierDueDiligence,
           nppStationOrders: [],
+          nppNicheOrders: [],
           recentSourceRuns: recentProblematicRuns,
           recentProcurements: this.selectLargestProcurements(analytics.attentionProcurements)
+        };
+      }
+      case "npp-market-niches": {
+        const nppNicheOrders = await this.buildNppNicheOrderItems();
+        const nicheProcurementSignals = nppNicheOrders.flatMap((niche) =>
+          niche.orders.map((order) => ({
+            id: order.procurementId,
+            externalId: order.externalId,
+            title: order.title,
+            status: order.status,
+            amount: order.amount ?? null,
+            currency: order.currency ?? null,
+            deadlineAt: null,
+            publishedAt: order.publishedAt ?? null,
+            customerName: order.customer ?? null,
+            sourceCode: order.source,
+            sourceName: order.source,
+            supplierName: order.supplier ?? null
+          }))
+        );
+
+        return {
+          status: liveStatus,
+          generatedAt,
+          metrics: this.buildNppNicheOrderMetrics(nppNicheOrders),
+          highlights: this.buildNppNicheOrderHighlights(nppNicheOrders),
+          scores: this.buildNppNicheOrderScores(nppNicheOrders),
+          actions: this.buildNppNicheOrderActions(nppNicheOrders),
+          deadlinePressure: analytics.deadlinePressure,
+          statusMix: this.buildStatusMix(nicheProcurementSignals),
+          amountDistribution: this.buildAmountDistribution(nicheProcurementSignals),
+          customerExposure: this.buildCustomerExposure(nicheProcurementSignals),
+          sourceContribution: this.buildSourceContribution(nicheProcurementSignals),
+          sourceHealth: analytics.sourceHealth.filter((item) =>
+            (NPP_SOURCE_CODES as readonly string[]).includes(item.source)
+          ),
+          supplierExposure: analytics.supplierExposure,
+          supplierDueDiligence: [],
+          nppStationOrders: [],
+          nppNicheOrders,
+          recentSourceRuns: recentProblematicRuns.filter((run) =>
+            (NPP_SOURCE_CODES as readonly string[]).includes(run.sourceCode)
+          ),
+          recentProcurements: nppNicheOrders
+            .flatMap((niche) =>
+              niche.orders.map((order) => ({
+                id: order.procurementId,
+                externalId: order.externalId,
+                source: order.source,
+                title: order.title,
+                description: niche.niche,
+                customer: order.customer ?? undefined,
+                supplier: order.supplier ?? undefined,
+                amount: order.amount ?? undefined,
+                currency: order.currency ?? undefined,
+                status: order.status as ProcurementStatus,
+                publishedAt: order.publishedAt ?? undefined,
+                deadlineAt: undefined,
+                sourceUrl: order.sourceUrl ?? undefined,
+                createdAt: order.publishedAt ?? generatedAt,
+                updatedAt: order.publishedAt ?? generatedAt,
+                rawPayload: {
+                  sourceSpecificData: {
+                    targetStationName: order.station,
+                    niche: niche.niche
+                  }
+                }
+              }))
+            )
+            .slice(0, 12)
         };
       }
       case "npp-station-orders": {
@@ -730,6 +916,7 @@ export class ReportsService implements OnModuleInit, OnModuleDestroy {
           supplierExposure: analytics.supplierExposure,
           supplierDueDiligence: [],
           nppStationOrders,
+          nppNicheOrders: [],
           recentSourceRuns: recentProblematicRuns.filter((run) =>
             (NPP_SOURCE_CODES as readonly string[]).includes(run.sourceCode)
           ),
@@ -772,6 +959,7 @@ export class ReportsService implements OnModuleInit, OnModuleDestroy {
           supplierExposure: analytics.supplierExposure.slice(0, 3),
           supplierDueDiligence: [],
           nppStationOrders: [],
+          nppNicheOrders: [],
           recentSourceRuns: recentProblematicRuns,
           recentProcurements: analytics.attentionProcurements.slice(0, 4)
         };
@@ -793,6 +981,7 @@ export class ReportsService implements OnModuleInit, OnModuleDestroy {
           supplierExposure: analytics.supplierExposure,
           supplierDueDiligence: [],
           nppStationOrders: [],
+          nppNicheOrders: [],
           recentSourceRuns: dashboard.recentSourceRuns,
           recentProcurements: this.selectLargestProcurements(dashboard.recentProcurements)
         };
@@ -843,7 +1032,11 @@ export class ReportsService implements OnModuleInit, OnModuleDestroy {
       return hasSupplierRiskData ? ReportStatus.READY : ReportStatus.PENDING;
     }
 
-    if (reportType === "supplier-due-diligence" || reportType === "npp-station-orders") {
+    if (
+      reportType === "supplier-due-diligence" ||
+      reportType === "npp-market-niches" ||
+      reportType === "npp-station-orders"
+    ) {
       return dashboard.totalProcurements > 0 ? ReportStatus.READY : ReportStatus.PENDING;
     }
 
@@ -888,7 +1081,11 @@ export class ReportsService implements OnModuleInit, OnModuleDestroy {
       dates.push(...dashboard.recentSourceRuns.map((item) => item.startedAt));
     }
 
-    if (reportType === "supplier-due-diligence" || reportType === "npp-station-orders") {
+    if (
+      reportType === "supplier-due-diligence" ||
+      reportType === "npp-market-niches" ||
+      reportType === "npp-station-orders"
+    ) {
       dates.push(...dashboard.recentSourceRuns.map((item) => item.startedAt));
 
       if (dashboard.lastPublishedAt) {
@@ -1624,7 +1821,7 @@ export class ReportsService implements OnModuleInit, OnModuleDestroy {
     return actions.slice(0, 3);
   }
 
-  private async buildNppStationOrderItems() {
+  private async loadNppProcurementEntries(): Promise<NppProcurementEntry[]> {
     const procurements = await this.prisma.procurement.findMany({
       where: {
         deletedAt: null,
@@ -1640,7 +1837,38 @@ export class ReportsService implements OnModuleInit, OnModuleDestroy {
       },
       orderBy: [{ publishedAt: "desc" }, { createdAt: "desc" }]
     });
+    const items: NppProcurementEntry[] = [];
 
+    for (const item of procurements) {
+      const station = resolveNppStationName(item.rawPayload, [item.title, item.customerName]);
+
+      if (!station) {
+        continue;
+      }
+
+      items.push({
+        procurementId: item.id,
+        externalId: item.externalId,
+        title: item.title,
+        description: item.description ?? undefined,
+        station,
+        customer: item.customerName ?? undefined,
+        supplier: item.supplier?.name ?? undefined,
+        source: item.source.code,
+        amount: item.amount,
+        currency: item.currency,
+        status: item.status,
+        publishedAt: item.publishedAt ?? item.createdAt,
+        sourceUrl: item.sourceUrl,
+        sourceType: resolveSourceType(item.rawPayload)
+      });
+    }
+
+    return items;
+  }
+
+  private async buildNppStationOrderItems() {
+    const procurements = await this.loadNppProcurementEntries();
     const grouped = new Map<
       string,
       {
@@ -1667,16 +1895,8 @@ export class ReportsService implements OnModuleInit, OnModuleDestroy {
     >();
 
     for (const item of procurements) {
-      const station = resolveNppStationName(item.rawPayload, [item.title, item.customerName]);
-
-      if (!station) {
-        continue;
-      }
-
-      const effectiveDate = item.publishedAt ?? item.createdAt;
-      const sourceType = resolveSourceType(item.rawPayload);
-      const current = grouped.get(station) ?? {
-        station,
+      const current = grouped.get(item.station) ?? {
+        station: item.station,
         procurementCount: 0,
         contractCount: 0,
         totalAmount: 0,
@@ -1686,30 +1906,30 @@ export class ReportsService implements OnModuleInit, OnModuleDestroy {
       };
 
       current.procurementCount += 1;
-      current.contractCount += sourceType === "contract" ? 1 : 0;
+      current.contractCount += item.sourceType === "contract" ? 1 : 0;
       current.totalAmount += item.amount ?? 0;
       current.firstPublishedAt =
-        !current.firstPublishedAt || effectiveDate.getTime() < current.firstPublishedAt.getTime()
-          ? effectiveDate
+        !current.firstPublishedAt || item.publishedAt.getTime() < current.firstPublishedAt.getTime()
+          ? item.publishedAt
           : current.firstPublishedAt;
       current.lastPublishedAt =
-        !current.lastPublishedAt || effectiveDate.getTime() > current.lastPublishedAt.getTime()
-          ? effectiveDate
+        !current.lastPublishedAt || item.publishedAt.getTime() > current.lastPublishedAt.getTime()
+          ? item.publishedAt
           : current.lastPublishedAt;
       current.orders.push({
-        procurementId: item.id,
+        procurementId: item.procurementId,
         externalId: item.externalId,
         title: item.title,
-        customer: item.customerName ?? undefined,
-        supplier: item.supplier?.name ?? undefined,
-        source: item.source.code,
+        customer: item.customer,
+        supplier: item.supplier,
+        source: item.source,
         amount: item.amount,
         currency: item.currency,
         status: item.status,
-        publishedAt: item.publishedAt ?? item.createdAt,
+        publishedAt: item.publishedAt,
         sourceUrl: item.sourceUrl
       });
-      grouped.set(station, current);
+      grouped.set(item.station, current);
     }
 
     return Array.from(grouped.values())
@@ -1725,6 +1945,93 @@ export class ReportsService implements OnModuleInit, OnModuleDestroy {
         )
       }))
       .sort((left, right) => right.procurementCount - left.procurementCount || left.station.localeCompare(right.station));
+  }
+
+  private async buildNppNicheOrderItems() {
+    const procurements = await this.loadNppProcurementEntries();
+    const grouped = new Map<
+      string,
+      {
+        niche: string;
+        procurementCount: number;
+        totalAmount: number;
+        lastPublishedAt: Date | null;
+        stations: Set<string>;
+        orders: Array<{
+          procurementId: string;
+          externalId: string;
+          title: string;
+          station: string;
+          customer?: string;
+          supplier?: string;
+          source: string;
+          amount?: number | null;
+          currency?: string | null;
+          status: ProcurementStatus;
+          publishedAt?: Date | null;
+          sourceUrl?: string | null;
+        }>;
+      }
+    >();
+
+    for (const item of procurements) {
+      const niche = resolveNppProcurementNiche([
+        item.title,
+        item.description,
+        item.customer,
+        item.supplier
+      ]);
+      const current = grouped.get(niche) ?? {
+        niche,
+        procurementCount: 0,
+        totalAmount: 0,
+        lastPublishedAt: null,
+        stations: new Set<string>(),
+        orders: []
+      };
+
+      current.procurementCount += 1;
+      current.totalAmount += item.amount ?? 0;
+      current.stations.add(item.station);
+      current.lastPublishedAt =
+        !current.lastPublishedAt || item.publishedAt.getTime() > current.lastPublishedAt.getTime()
+          ? item.publishedAt
+          : current.lastPublishedAt;
+      current.orders.push({
+        procurementId: item.procurementId,
+        externalId: item.externalId,
+        title: item.title,
+        station: item.station,
+        customer: item.customer,
+        supplier: item.supplier,
+        source: item.source,
+        amount: item.amount,
+        currency: item.currency,
+        status: item.status,
+        publishedAt: item.publishedAt,
+        sourceUrl: item.sourceUrl
+      });
+      grouped.set(niche, current);
+    }
+
+    return Array.from(grouped.values())
+      .map((item) => ({
+        niche: item.niche,
+        procurementCount: item.procurementCount,
+        stationCount: item.stations.size,
+        totalAmount: this.roundMetric(item.totalAmount),
+        lastPublishedAt: item.lastPublishedAt,
+        stations: [...item.stations].sort((left, right) => left.localeCompare(right)),
+        orders: item.orders.sort(
+          (left, right) => (right.publishedAt?.getTime() ?? 0) - (left.publishedAt?.getTime() ?? 0)
+        )
+      }))
+      .sort(
+        (left, right) =>
+          right.procurementCount - left.procurementCount ||
+          right.totalAmount - left.totalAmount ||
+          left.niche.localeCompare(right.niche)
+      );
   }
 
   private buildNppStationOrderMetrics(
@@ -1866,6 +2173,153 @@ export class ReportsService implements OnModuleInit, OnModuleDestroy {
       actions.push({
         title: "Добрать слой контрактов",
         description: `Для ${this.formatInteger(noContracts.length)} станций видны закупки, но пока не хватает договорного следа.`,
+        priority: "Средний"
+      });
+    }
+
+    return actions.slice(0, 3);
+  }
+
+  private buildNppNicheOrderMetrics(
+    items: Awaited<ReturnType<ReportsService["buildNppNicheOrderItems"]>>
+  ) {
+    const procurementCount = items.reduce((sum, item) => sum + item.procurementCount, 0);
+    const totalAmount = items.reduce((sum, item) => sum + item.totalAmount, 0);
+    const coveredStations = new Set(items.flatMap((item) => item.stations)).size;
+
+    return [
+      {
+        label: "Ниш в контуре",
+        value: this.formatInteger(items.length),
+        hint: "Укрупнённые тематические категории закупок, найденные по АЭС."
+      },
+      {
+        label: "Заказов АЭС",
+        value: this.formatInteger(procurementCount),
+        hint: "Все закупки и договоры АЭС, попавшие в нишевую группировку."
+      },
+      {
+        label: "Сумма по нишам",
+        value: new Intl.NumberFormat("ru-RU", { maximumFractionDigits: 0 }).format(totalAmount),
+        hint: "Суммарный объём закупок АЭС, где заполнена сумма."
+      },
+      {
+        label: "Покрытые АЭС",
+        value: this.formatPercent((coveredStations / NPP_STATION_NAMES.length) * 100),
+        hint: "Доля станций, которые уже представлены в нишевом отчёте."
+      }
+    ];
+  }
+
+  private buildNppNicheOrderHighlights(
+    items: Awaited<ReturnType<ReportsService["buildNppNicheOrderItems"]>>
+  ) {
+    const topNiche = items[0];
+    const mostExpensiveNiche = [...items].sort((left, right) => right.totalAmount - left.totalAmount)[0];
+    const widestNiche = [...items].sort((left, right) => right.stationCount - left.stationCount)[0];
+
+    return [
+      {
+        title: "Самая активная ниша",
+        description: topNiche
+          ? `${topNiche.niche}: ${this.formatInteger(topNiche.procurementCount)} закупок по ${this.formatInteger(topNiche.stationCount)} АЭС.`
+          : "Пока не хватает данных для выделения ведущей ниши.",
+        severity: topNiche ? "info" : "warning"
+      },
+      {
+        title: "Ниша с крупнейшим бюджетом",
+        description: mostExpensiveNiche
+          ? `${mostExpensiveNiche.niche}: ${new Intl.NumberFormat("ru-RU", { maximumFractionDigits: 0 }).format(mostExpensiveNiche.totalAmount)} RUB.`
+          : "Суммы по нишам пока не заполнены.",
+        severity: mostExpensiveNiche ? "success" : "warning"
+      },
+      {
+        title: "Самое широкое покрытие",
+        description: widestNiche
+          ? `${widestNiche.niche} встречается на ${this.formatInteger(widestNiche.stationCount)} станциях.`
+          : "Ширину покрытия по нишам пока не удалось оценить.",
+        severity: widestNiche ? "info" : "warning"
+      }
+    ];
+  }
+
+  private buildNppNicheOrderScores(
+    items: Awaited<ReturnType<ReportsService["buildNppNicheOrderItems"]>>
+  ) {
+    const procurementCount = Math.max(
+      items.reduce((sum, item) => sum + item.procurementCount, 0),
+      1
+    );
+    const coveredStations = new Set(items.flatMap((item) => item.stations)).size;
+    const filledAmounts = items
+      .flatMap((item) => item.orders)
+      .filter((order) => typeof order.amount === "number").length;
+    const topNicheShare = items[0] ? (items[0].procurementCount / procurementCount) * 100 : 0;
+    const averageStationsPerNiche =
+      items.length > 0
+        ? items.reduce((sum, item) => sum + item.stationCount, 0) / items.length
+        : 0;
+
+    return [
+      {
+        label: "Разнообразие ниш",
+        value: this.clampScore(items.length * 12),
+        detail: "Чем больше различных ниш видно в закупках АЭС, тем полнее тематическая карта спроса.",
+        severity: items.length < 4 ? "warning" : "success"
+      },
+      {
+        label: "Покрытие станций",
+        value: this.clampScore((coveredStations / NPP_STATION_NAMES.length) * 100),
+        detail: "Сколько АЭС уже участвует в нишевом срезе.",
+        severity: coveredStations < Math.ceil(NPP_STATION_NAMES.length / 2) ? "warning" : "success"
+      },
+      {
+        label: "Заполненность сумм",
+        value: this.clampScore((filledAmounts / procurementCount) * 100),
+        detail: "Можно ли сравнивать ниши не только по числу заказов, но и по бюджету.",
+        severity: filledAmounts / procurementCount < 0.65 ? "warning" : "success"
+      },
+      {
+        label: "Баланс ниш",
+        value: this.clampScore(Math.max(0, 100 - topNicheShare + averageStationsPerNiche * 2)),
+        detail: "Показывает, не слишком ли одна ниша доминирует над остальными.",
+        severity: topNicheShare > 45 ? "warning" : "success"
+      }
+    ];
+  }
+
+  private buildNppNicheOrderActions(
+    items: Awaited<ReturnType<ReportsService["buildNppNicheOrderItems"]>>
+  ) {
+    const actions = [];
+    const procurementCount = Math.max(
+      items.reduce((sum, item) => sum + item.procurementCount, 0),
+      1
+    );
+    const topNiche = items[0];
+    const narrowNiches = items.filter((item) => item.stationCount === 1);
+    const uncategorized = items.find((item) => item.niche === "Прочее");
+
+    if (topNiche && (topNiche.procurementCount / procurementCount) * 100 >= 35) {
+      actions.push({
+        title: "Проверить доминирующую нишу",
+        description: `${topNiche.niche} формирует заметную долю атомных закупок и заслуживает отдельного мониторинга.`,
+        priority: "Высокий"
+      });
+    }
+
+    if (narrowNiches.length > 0) {
+      actions.push({
+        title: "Расширить нишевое покрытие по станциям",
+        description: `У ${this.formatInteger(narrowNiches.length)} ниш пока есть данные только по одной АЭС.`,
+        priority: "Средний"
+      });
+    }
+
+    if (uncategorized && uncategorized.procurementCount >= Math.max(3, Math.ceil(procurementCount * 0.2))) {
+      actions.push({
+        title: "Уточнить классификацию закупок",
+        description: `В категории «${uncategorized.niche}» скопилось ${this.formatInteger(uncategorized.procurementCount)} записей, стоит расширить словарь ниш.`,
         priority: "Средний"
       });
     }
@@ -2162,6 +2616,22 @@ function isRegistryEntryActive(registryStatus: string | null, exclusionDate: Dat
 function resolveSourceType(rawPayload: unknown): string | undefined {
   const sourceSpecificData = getSourceSpecificData(rawPayload);
   return typeof sourceSpecificData?.sourceType === "string" ? sourceSpecificData.sourceType : undefined;
+}
+
+function resolveNppProcurementNiche(values: ReadonlyArray<string | null | undefined>) {
+  const normalized = values
+    .filter((value): value is string => typeof value === "string" && value.trim().length > 0)
+    .map((value) => value.toLowerCase())
+    .join(" ")
+    .replace(/[^a-zа-я0-9]+/gi, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+
+  if (!normalized) {
+    return "Прочее";
+  }
+
+  return NPP_NICHE_RULES.find((rule) => rule.pattern.test(normalized))?.niche ?? "Прочее";
 }
 
 function resolveSupplierKey(input: { supplier?: string; taxId?: string; ogrn?: string }) {

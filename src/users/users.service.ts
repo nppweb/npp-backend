@@ -110,6 +110,90 @@ export class UsersService {
     return user;
   }
 
+  async updateUser(
+    userId: string,
+    input: {
+      email: string;
+      fullName: string;
+      avatarUrl?: string | null;
+      role: UserRole;
+      newPassword?: string | null;
+    },
+    actor: AuthenticatedUser,
+    request?: RequestLike
+  ) {
+    const existingUser = await this.requireExistingUser(userId);
+    const normalizedEmail = input.email.trim().toLowerCase();
+    const fullName = input.fullName.trim();
+
+    const existingByEmail = await this.prisma.user.findUnique({
+      where: { email: normalizedEmail }
+    });
+
+    if (existingByEmail && existingByEmail.id !== existingUser.id && !existingByEmail.deletedAt) {
+      throw new ConflictException("User with this email already exists");
+    }
+
+    const avatarUrl =
+      input.avatarUrl === undefined
+        ? existingUser.avatarUrl
+        : input.avatarUrl && input.avatarUrl.trim().length > 0
+          ? input.avatarUrl.trim()
+          : null;
+
+    if (avatarUrl && avatarUrl.length > 2_000_000) {
+      throw new ConflictException("Avatar image is too large");
+    }
+
+    const normalizedPassword = input.newPassword?.trim();
+    const passwordHash =
+      normalizedPassword && normalizedPassword.length > 0
+        ? await this.authService.hashPassword(normalizedPassword)
+        : undefined;
+
+    const updated = await this.prisma.user.update({
+      where: { id: userId },
+      data: {
+        email: normalizedEmail,
+        fullName,
+        avatarUrl,
+        role: input.role,
+        ...(passwordHash ? { passwordHash } : {})
+      }
+    });
+
+    if (passwordHash) {
+      await this.revokeUserSessions(updated.id);
+    }
+
+    await this.auditService.record(
+      AuditAction.USER_ROLE_UPDATED,
+      "User",
+      updated.id,
+      {
+        actorId: actor.id,
+        role: input.role,
+        email: normalizedEmail,
+        fullName,
+        avatarChanged: avatarUrl !== existingUser.avatarUrl,
+        passwordChanged: Boolean(passwordHash)
+      },
+      this.buildAuditContext(actor, request)
+    );
+
+    if (passwordHash) {
+      await this.auditService.record(
+        AuditAction.USER_PASSWORD_CHANGED,
+        "User",
+        updated.id,
+        { actorId: actor.id, resetByAdmin: true, viaUpdateUser: true },
+        this.buildAuditContext(actor, request)
+      );
+    }
+
+    return updated;
+  }
+
   async updateUserRole(
     userId: string,
     role: UserRole,
@@ -154,6 +238,33 @@ export class UsersService {
       "User",
       user.id,
       { actorId: actor.id, deactivated: true },
+      this.buildAuditContext(actor, request)
+    );
+
+    return true;
+  }
+
+  async deleteUser(userId: string, actor: AuthenticatedUser, request?: RequestLike) {
+    if (userId === actor.id) {
+      throw new ConflictException("You cannot delete your own account");
+    }
+
+    await this.requireExistingUser(userId);
+
+    const user = await this.prisma.user.update({
+      where: { id: userId },
+      data: {
+        isActive: false,
+        deletedAt: new Date()
+      }
+    });
+    await this.revokeUserSessions(user.id);
+
+    await this.auditService.record(
+      AuditAction.USER_ROLE_UPDATED,
+      "User",
+      user.id,
+      { actorId: actor.id, deleted: true },
       this.buildAuditContext(actor, request)
     );
 

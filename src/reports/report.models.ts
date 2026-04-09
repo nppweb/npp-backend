@@ -262,6 +262,69 @@ export class ReportNppStationOrderItem {
 }
 
 @ObjectType()
+export class ReportNppNicheOrderEntry {
+  @Field(() => ID)
+  procurementId!: string;
+
+  @Field()
+  externalId!: string;
+
+  @Field()
+  title!: string;
+
+  @Field()
+  station!: string;
+
+  @Field(() => String, { nullable: true })
+  customer?: string;
+
+  @Field(() => String, { nullable: true })
+  supplier?: string;
+
+  @Field()
+  source!: string;
+
+  @Field(() => Float, { nullable: true })
+  amount?: number | null;
+
+  @Field(() => String, { nullable: true })
+  currency?: string;
+
+  @Field()
+  status!: string;
+
+  @Field(() => Date, { nullable: true })
+  publishedAt?: Date | null;
+
+  @Field(() => String, { nullable: true })
+  sourceUrl?: string;
+}
+
+@ObjectType()
+export class ReportNppNicheItem {
+  @Field()
+  niche!: string;
+
+  @Field()
+  procurementCount!: number;
+
+  @Field()
+  stationCount!: number;
+
+  @Field(() => Float)
+  totalAmount!: number;
+
+  @Field(() => Date, { nullable: true })
+  lastPublishedAt?: Date | null;
+
+  @Field(() => [String])
+  stations!: string[];
+
+  @Field(() => [ReportNppNicheOrderEntry])
+  orders!: ReportNppNicheOrderEntry[];
+}
+
+@ObjectType()
 export class ReportDetail {
   @Field(() => ID)
   id!: string;
@@ -319,6 +382,9 @@ export class ReportDetail {
 
   @Field(() => [ReportNppStationOrderItem])
   nppStationOrders!: ReportNppStationOrderItem[];
+
+  @Field(() => [ReportNppNicheItem])
+  nppNicheOrders!: ReportNppNicheItem[];
 
   @Field(() => [SourceRun])
   recentSourceRuns!: SourceRun[];
